@@ -1,0 +1,43 @@
+name: ecofone
+description: A Flutter app for refurbished phone selling platform similar to Cashify/Ecofone.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  video_player: 2.9.5
+  geolocator: ^11.0.0
+  geocoding: ^3.0.0
+  url_launcher: ^6.2.5
+  shared_preferences: ^2.2.3
+  http: ^1.2.1
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.4
+  firebase_auth: ^5.3.1
+  google_fonts: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+dependency_overrides:
+  geolocator_android: 4.6.1
+
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo/logo.png
+    - assets/logo/logo_transparent.png
+    - assets/logo/ecofone_horizontal_logo.png
+    - assets/logo/brand_banner.jpg
+    - assets/videos/logo_animation.mp4
+    - assets/phones/
