@@ -5,8 +5,8 @@ import 'package:ecofone/core/widgets/phone_3d_pop_showcase.dart';
 import 'package:ecofone/core/widgets/phone_context_peek_pop.dart';
 import 'package:ecofone/core/widgets/phone_hero_feature_reveal.dart';
 import 'package:ecofone/core/widgets/phone_quick_peek_dialog.dart';
-import 'package:ecofone/models/inventory_model.dart';
 import 'package:ecofone/screens/phone_detail_screen.dart';
+import 'package:ecofone/state/app_state.dart';
 
 void main() {
   testWidgets('PhoneDetailScreen renders phone specs, price, and similar phones', (WidgetTester tester) async {
@@ -106,7 +106,7 @@ void main() {
 
     // Verify Quick Action Buttons
     expect(find.textContaining('Buy Now'), findsOneWidget);
-    expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.favorite_border_rounded), findsOneWidget);
     expect(find.text('360° Studio'), findsOneWidget);
   });
 
@@ -259,6 +259,74 @@ void main() {
     expect(find.text('${sampleItem.batteryHealth}% Battery Health'), findsOneWidget);
     expect(find.text('12M Warranty Included'), findsOneWidget);
     expect(find.text('Tap anywhere to close'), findsOneWidget);
+  });
+
+  testWidgets('Buy Now flow: guest user sees Quick Mobile Login, verifies OTP, then proceeds to Address & Order', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    AppState.instance.logout();
+    final sampleItem = PhoneStockItem.sampleInventory.first;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PhoneDetailScreen(
+          phone: sampleItem,
+          allPhones: PhoneStockItem.sampleInventory,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Tap "Buy Now" button
+    await tester.tap(find.textContaining('Buy Now').first);
+    await tester.pumpAndSettle();
+
+    // Verify Step 1: Quick Mobile Login is displayed
+    expect(find.text('Quick Mobile Login'), findsOneWidget);
+    expect(find.text('10-Digit Mobile Number *'), findsOneWidget);
+    expect(find.text('Send Verification OTP'), findsOneWidget);
+
+    // Enter phone number
+    await tester.enterText(find.widgetWithText(TextField, '10-Digit Mobile Number *'), '9876543210');
+    await tester.pumpAndSettle();
+
+    // Tap Send Verification OTP
+    await tester.tap(find.text('Send Verification OTP'));
+    await tester.pumpAndSettle();
+
+    // Verify Dynamic OTP Banner and Auto-fill button appear
+    expect(find.text('Dynamic In-App OTP'), findsOneWidget);
+    expect(find.text('Auto-fill'), findsOneWidget);
+
+    // Tap Auto-fill
+    await tester.tap(find.text('Auto-fill'));
+    await tester.pumpAndSettle();
+
+    // Tap "Verify & Proceed to Address"
+    await tester.tap(find.text('Verify & Proceed to Address'));
+    await tester.pumpAndSettle();
+
+    // Verify Step 2: Order Checkout is displayed
+    expect(find.text('Order Checkout'), findsOneWidget);
+    expect(find.text('Fulfillment Method'), findsOneWidget);
+    expect(find.text('Delivery Address & Pincode'), findsOneWidget);
+    expect(find.text('Contact Information'), findsOneWidget);
+    expect(find.text('Payment Method'), findsOneWidget);
+    expect(find.textContaining('Place Order'), findsOneWidget);
+
+    // Enter Address and Name
+    await tester.enterText(find.widgetWithText(TextField, 'Flat / House / Street Address'), 'Flat 402, Green Park');
+    await tester.enterText(find.widgetWithText(TextField, 'Your Full Name'), 'Rahul Sharma');
+    await tester.pumpAndSettle();
+
+    // Tap Place Order
+    await tester.tap(find.textContaining('Place Order'));
+    await tester.pumpAndSettle();
+
+    // Verify order placed / Tax invoice dialog
+    expect(find.textContaining('Order Placed Successfully'), findsOneWidget);
   });
 }
 

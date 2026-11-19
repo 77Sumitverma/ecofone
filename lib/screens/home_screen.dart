@@ -26,12 +26,20 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: _navIndex);
+    AppState.instance.addListener(_onAppStateChanged);
   }
 
- 
+  void _onAppStateChanged() {
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
 
   @override
   void dispose() {
+    AppState.instance.removeListener(_onAppStateChanged);
     _pageController.dispose();
     super.dispose();
   }
@@ -218,15 +226,18 @@ class _HomePageState extends State<HomePage> {
                                               curve: Curves.easeIn,
                                               child: ConstrainedBox(
                                                 constraints: const BoxConstraints(maxWidth: 52),
-                                                child: Text(
-                                                  label,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.bold,
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text(
+                                                    label,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
                                                   ),
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
                                                 ),
                                               ),
                                             ),

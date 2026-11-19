@@ -1647,7 +1647,7 @@ class MiniPhoneThumbnail extends StatelessWidget {
     final hasRealImage = cleanUrl != null && cleanUrl.isNotEmpty;
 
     if (hasRealImage) {
-      final isAsset = cleanUrl.startsWith('assets/') || !cleanUrl.startsWith('http');
+      final isAsset = cleanUrl.startsWith('assets/');
       return SizedBox(
         width: width,
         height: height,
@@ -1680,9 +1680,9 @@ class MiniPhoneThumbnail extends StatelessWidget {
                       cleanUrl,
                       width: width,
                       height: height,
-                      cacheWidth: (width * 3.0).round().clamp(150, 800),
-                      cacheHeight: (height * 3.0).round().clamp(200, 1200),
-                      filterQuality: FilterQuality.medium,
+                      cacheWidth: (width * 3.0).round().clamp(150, 1000),
+                      cacheHeight: (height * 3.0).round().clamp(200, 1400),
+                      filterQuality: FilterQuality.high,
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => _buildVectorCard(isApple),
                     )
@@ -1690,9 +1690,9 @@ class MiniPhoneThumbnail extends StatelessWidget {
                       cleanUrl,
                       width: width,
                       height: height,
-                      cacheWidth: (width * 3.0).round().clamp(150, 800),
-                      cacheHeight: (height * 3.0).round().clamp(200, 1200),
-                      filterQuality: FilterQuality.medium,
+                      cacheWidth: (width * 3.0).round().clamp(150, 1000),
+                      cacheHeight: (height * 3.0).round().clamp(200, 1400),
+                      filterQuality: FilterQuality.high,
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => _buildVectorCard(isApple),
                       loadingBuilder: (context, child, progress) {

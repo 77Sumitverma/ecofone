@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ecofone/models/user_profile.dart';
 import 'package:ecofone/models/order_model.dart';
+import 'package:ecofone/models/banner_model.dart';
 
 class LocalStorageService {
   static const String _keyUserProfile = 'ecofone_user_profile';
@@ -92,10 +93,10 @@ class LocalStorageService {
   Set<String> getWishlist() {
     try {
       final raw = _prefs?.getStringList(_keyWishlist);
-      return raw?.toSet() ?? {'EF-101', 'EF-103', 'EF-105'};
+      return raw?.toSet() ?? <String>{};
     } catch (e) {
       debugPrint('[LocalStorage] Error loading wishlist: $e');
-      return {'EF-101', 'EF-103', 'EF-105'};
+      return <String>{};
     }
   }
 
@@ -127,5 +128,31 @@ class LocalStorageService {
 
   Future<void> setHasSeenOnboarding(bool value) async {
     await _prefs?.setBool(_keyHasSeenOnboarding, value);
+  }
+
+  // --- Dynamic App Hero Banners Persistence ---
+  static const String _keyAppBanners = 'ecofone_app_banners';
+
+  List<AppBanner> getAppBanners() {
+    try {
+      final rawList = _prefs?.getStringList(_keyAppBanners);
+      if (rawList == null || rawList.isEmpty) return [];
+      return rawList.map((item) {
+        final Map<String, dynamic> jsonMap = jsonDecode(item) as Map<String, dynamic>;
+        return AppBanner.fromJson(jsonMap);
+      }).toList();
+    } catch (e) {
+      debugPrint('[LocalStorage] Error loading saved banners: $e');
+      return [];
+    }
+  }
+
+  Future<void> saveAppBanners(List<AppBanner> list) async {
+    try {
+      final strList = list.map((b) => jsonEncode(b.toJson())).toList();
+      await _prefs?.setStringList(_keyAppBanners, strList);
+    } catch (e) {
+      debugPrint('[LocalStorage] Error saving banners: $e');
+    }
   }
 }

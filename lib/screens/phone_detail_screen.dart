@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +11,7 @@ import 'package:ecofone/screens/location_sheet.dart';
 import 'package:ecofone/state/app_state.dart';
 import 'package:ecofone/core/widgets/pos_invoice_sheet.dart';
 import 'package:ecofone/services/payment/razorpay_checkout_service.dart';
+import 'package:ecofone/services/network/connectivity_service.dart';
 
 /// Interactive Draggable Pop-up Detail Sheet (60 FPS Native Physics)
 class PhoneDetailSheet {
@@ -265,7 +267,11 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
   }
 
   void _onAppStateChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   String _formatPrice(int price) {
@@ -470,12 +476,16 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                         children: [
                           const Icon(Icons.verified_rounded, size: 12, color: _softGreen),
                           const SizedBox(width: 4),
-                          Text(
-                            'EcoFone Certified Refurbished',
-                            style: TextStyle(
-                              color: _forestGreen.withOpacity(0.65),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                          Expanded(
+                            child: Text(
+                              'EcoFone Certified Refurbished',
+                              style: TextStyle(
+                                color: _forestGreen.withOpacity(0.65),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
@@ -668,18 +678,22 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _softGreen.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  'Save ${_formatPrice(_calculatedSavingsAmount)} ($_calculatedSavingsPercent% OFF)',
-                  style: const TextStyle(
-                    color: _softGreen,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11.5,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _softGreen.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'Save ${_formatPrice(_calculatedSavingsAmount)} ($_calculatedSavingsPercent% OFF)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _softGreen,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                    ),
                   ),
                 ),
               ),
@@ -1305,7 +1319,39 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
   }
 
   /// Modern E-Commerce Checkout Sheet (Cashify & Flipkart Standard Flow)
+  /// Modern E-Commerce Checkout Sheet (Cashify & Flipkart Standard Flow)
+  /// If user is NOT logged in: Step 1 (Phone number + Fast OTP Login) -> Step 2 (Phone & Address + Place Order)
+  /// If user IS logged in: Directly Step 2 (Phone & Address + Place Order with saved details)
   void _showCheckoutBottomSheet(EcoStore selectedStore) {
+    int currentStep = AppState.instance.isLoggedIn ? 2 : 1;
+    bool otpSent = false;
+    bool isSendingOtp = false;
+    bool isVerifyingOtp = false;
+    String? phoneLoginError;
+    String? activeDynamicOtp;
+    int resendCountdown = 30;
+    Timer? resendTimer;
+
+    final phoneLoginCtrl = TextEditingController();
+    final otpLoginCtrl = TextEditingController();
+
+    void startResendTimer(void Function(void Function()) setModalState) {
+      resendTimer?.cancel();
+      resendCountdown = 30;
+      resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (resendCountdown <= 1) {
+          timer.cancel();
+          setModalState(() {
+            resendCountdown = 0;
+          });
+        } else {
+          setModalState(() {
+            resendCountdown--;
+          });
+        }
+      });
+    }
+
     final initialPhone = AppState.instance.userPhone ?? '';
     final cleanPhone = initialPhone.replaceAll(RegExp(r'[^0-9]'), '');
     final tenDigit = cleanPhone.length >= 10
@@ -1313,10 +1359,14 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
         : cleanPhone;
     final nameController = TextEditingController(text: AppState.instance.userName ?? '');
     final phoneController = TextEditingController(text: tenDigit);
+    final loc = AppState.instance.userLocation;
+    final defaultAddress = [
+      if (loc.area.isNotEmpty) loc.area,
+      if (loc.city.isNotEmpty) loc.city,
+      'Uttar Pradesh',
+    ].join(', ');
     final addressController = TextEditingController(
-      text: AppState.instance.userLocation.city.isNotEmpty
-          ? '${AppState.instance.userLocation.city}, Uttar Pradesh'
-          : '',
+      text: loc.city.isNotEmpty ? defaultAddress : '',
     );
     final pincodeController = TextEditingController(text: AppState.instance.userLocation.pincode);
 
@@ -1367,9 +1417,11 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Order Checkout',
-                                style: TextStyle(
+                              Text(
+                                currentStep == 1
+                                    ? (otpSent ? 'Verify Mobile OTP' : 'Quick Mobile Login')
+                                    : 'Order Checkout',
+                                style: const TextStyle(
                                   color: _forestGreen,
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
@@ -1377,7 +1429,11 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '${_currentPhone.name} ($_selectedStorage, $_selectedColor)',
+                                currentStep == 1
+                                    ? (otpSent
+                                        ? 'Enter 6-digit OTP sent to +91 ${phoneLoginCtrl.text.trim()}'
+                                        : 'Sign in with phone to proceed with order & live tracking')
+                                    : '${_currentPhone.name} ($_selectedStorage, $_selectedColor)',
                                 style: TextStyle(
                                   color: _forestGreen.withOpacity(0.7),
                                   fontWeight: FontWeight.w600,
@@ -1399,7 +1455,364 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                     ),
                     const SizedBox(height: 14),
 
-                    // 1. Delivery / Pickup Toggle Selector
+                    // STEP 1: MOBILE LOGIN VIA OTP (When user is not logged in)
+                    if (currentStep == 1) ...[
+                      // Product mini preview
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        margin: const EdgeInsets.only(bottom: 14),
+                        decoration: BoxDecoration(
+                          color: _forestGreen.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _forestGreen.withOpacity(0.12)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: (_currentPhone.imageUrl != null && _currentPhone.imageUrl!.isNotEmpty)
+                                  ? Image.asset(
+                                      _currentPhone.imageUrl!,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Icon(_currentPhone.icon, color: _forestGreen, size: 24),
+                                    )
+                                  : Icon(_currentPhone.icon, color: _forestGreen, size: 24),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _currentPhone.name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _forestGreen),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    '$_selectedStorage • $_selectedColor • ${_currentPhone.conditionGrade}',
+                                    style: TextStyle(color: Colors.black.withOpacity(0.6), fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              _formatPrice(_calculatedRefurbishedPrice),
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: _forestGreen),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      if (!otpSent) ...[
+                        TextField(
+                          controller: phoneLoginCtrl,
+                          keyboardType: TextInputType.phone,
+                          maxLength: 10,
+                          onChanged: (val) {
+                            if (phoneLoginError != null) {
+                              setModalState(() => phoneLoginError = null);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: '10-Digit Mobile Number *',
+                            hintText: '98765 43210',
+                            counterText: '',
+                            errorText: phoneLoginError,
+                            prefixText: '+91 ',
+                            prefixStyle: const TextStyle(fontWeight: FontWeight.bold, color: _forestGreen),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            prefixIcon: const Icon(Icons.phone_iphone_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: isSendingOtp
+                                ? null
+                                : () async {
+                                    final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+                                    final isValidIndianNumber = RegExp(r'^[6-9]\d{9}$').hasMatch(clean);
+
+                                    if (!isValidIndianNumber) {
+                                      setModalState(() {
+                                        phoneLoginError = 'Enter a valid 10-digit mobile (starts with 6, 7, 8, or 9)';
+                                      });
+                                      return;
+                                    }
+
+                                    setModalState(() {
+                                      isSendingOtp = true;
+                                      phoneLoginError = null;
+                                    });
+
+                                    await AppState.instance.sendOtp(clean);
+                                    if (!modalCtx.mounted) return;
+
+                                    final generated = AppState.instance.backend?.getActiveOtp(clean) ?? '123456';
+                                    setModalState(() {
+                                      isSendingOtp = false;
+                                      otpSent = true;
+                                      activeDynamicOtp = generated;
+                                    });
+                                    startResendTimer(setModalState);
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _forestGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: isSendingOtp
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text(
+                                    'Send Verification OTP',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                          ),
+                        ),
+                      ] else ...[
+                        // Dynamic OTP Banner
+                        if (activeDynamicOtp != null)
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 14),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0F3B28), Color(0xFF16543A)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.key_rounded, size: 18, color: EcoColors.brightAmber),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Dynamic In-App OTP',
+                                        style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                                      ),
+                                      Text(
+                                        activeDynamicOtp!,
+                                        style: const TextStyle(
+                                          color: EcoColors.brightAmber,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 18,
+                                          letterSpacing: 4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                BouncingWidget(
+                                  scaleFactor: 0.92,
+                                  onTap: () {
+                                    setModalState(() {
+                                      otpLoginCtrl.text = activeDynamicOtp!;
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: EcoColors.brightAmber,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.bolt_rounded, size: 14, color: _forestGreen),
+                                        SizedBox(width: 3),
+                                        Text(
+                                          'Auto-fill',
+                                          style: TextStyle(
+                                            color: _forestGreen,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        TextField(
+                          controller: otpLoginCtrl,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 8,
+                            color: _forestGreen,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: '6-digit SMS OTP',
+                            counterText: '',
+                            hintText: '• • • • • •',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () {
+                                resendTimer?.cancel();
+                                setModalState(() {
+                                  otpSent = false;
+                                  otpLoginCtrl.clear();
+                                });
+                              },
+                              icon: const Icon(Icons.arrow_back_rounded, size: 14),
+                              label: const Text('Change Number', style: TextStyle(fontSize: 12)),
+                            ),
+                            if (resendCountdown > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.timer_outlined, size: 14, color: Colors.grey),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Resend in ${resendCountdown}s',
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+                                  await AppState.instance.sendOtp(clean);
+                                  final newOtp = AppState.instance.backend?.getActiveOtp(clean) ?? '123456';
+                                  setModalState(() {
+                                    activeDynamicOtp = newOtp;
+                                  });
+                                  startResendTimer(setModalState);
+                                },
+                                icon: const Icon(Icons.refresh_rounded, size: 14, color: _copper),
+                                label: const Text('Resend Code', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _copper)),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: isVerifyingOtp
+                                ? null
+                                : () async {
+                                    final enteredOtp = otpLoginCtrl.text.trim();
+                                    if (enteredOtp.length < 4) {
+                                      ScaffoldMessenger.of(context).clearSnackBars();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Please enter the 6-digit SMS OTP')),
+                                      );
+                                      return;
+                                    }
+
+                                    setModalState(() => isVerifyingOtp = true);
+                                    final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+
+                                    final profile = await AppState.instance.verifyOtpAndLogin(
+                                      phone: clean,
+                                      otp: enteredOtp,
+                                    );
+
+                                    if (profile == null) {
+                                      setModalState(() => isVerifyingOtp = false);
+                                      if (!modalCtx.mounted) return;
+                                      ScaffoldMessenger.of(context).clearSnackBars();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          backgroundColor: Colors.redAccent,
+                                          content: Text('❌ Invalid OTP. Tap Auto-fill or enter correct code.'),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    resendTimer?.cancel();
+
+                                    // Successfully logged in! Populate Step 2 fields and advance!
+                                    phoneController.text = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
+                                    if (profile.name.isNotEmpty && profile.name != 'Valued Customer') {
+                                      nameController.text = profile.name;
+                                    }
+                                    final currentLoc = AppState.instance.userLocation;
+                                    if (currentLoc.area.isNotEmpty) {
+                                      addressController.text = [
+                                        currentLoc.area,
+                                        if (currentLoc.city.isNotEmpty) currentLoc.city,
+                                        'Uttar Pradesh'
+                                      ].join(', ');
+                                    }
+                                    if (currentLoc.pincode.isNotEmpty) {
+                                      pincodeController.text = currentLoc.pincode;
+                                    }
+
+                                    setModalState(() {
+                                      isVerifyingOtp = false;
+                                      currentStep = 2; // Advance to Delivery & Order Step!
+                                    });
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _forestGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: isVerifyingOtp
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text(
+                                    'Verify & Proceed to Address',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ]
+                    // ==========================================
+                    // STEP 2: DELIVERY DETAILS & PLACE ORDER
+                    // ==========================================
+                    else ...[
+                      // 1. Delivery / Pickup Toggle Selector
                     const Text(
                       'Fulfillment Method',
                       style: TextStyle(color: _forestGreen, fontWeight: FontWeight.bold, fontSize: 13),
@@ -1724,27 +2137,66 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                       child: ElevatedButton(
                         onPressed: () async {
                           final customerName = nameController.text.trim().isEmpty
-                              ? (AppState.instance.userName ?? 'Valued Customer')
+                              ? (AppState.instance.userName ?? '')
                               : nameController.text.trim();
+                          if (customerName.isEmpty || customerName.length < 2) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter your full name for delivery and GST invoice'),
+                                backgroundColor: _copper,
+                              ),
+                            );
+                            return;
+                          }
+
                           final rawDigits = phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-
-                          if (rawDigits.length < 10) {
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
-                            );
-                            return;
-                          }
-
-                          if (deliveryOption == 'Doorstep Delivery' && addressController.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please enter your delivery address')),
-                            );
-                            return;
-                          }
-
                           final tenDigitPhone = rawDigits.length >= 10 ? rawDigits.substring(rawDigits.length - 10) : rawDigits;
+                          if (tenDigitPhone.length != 10 || !RegExp(r'^[6-9]\d{9}$').hasMatch(tenDigitPhone)) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9)'),
+                                backgroundColor: _copper,
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (deliveryOption == 'Doorstep Delivery') {
+                            if (addressController.text.trim().length < 5) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter your full delivery address (House/Flat No., Street, Landmark)'),
+                                  backgroundColor: _copper,
+                                ),
+                              );
+                              return;
+                            }
+
+                            final pin = pincodeController.text.trim();
+                            if (pin.length != 6 || !RegExp(r'^[1-9]\d{5}$').hasMatch(pin)) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter a valid 6-digit delivery pincode'),
+                                  backgroundColor: _copper,
+                                ),
+                              );
+                              return;
+                            }
+                          }
+
+                          if (!ConnectivityService.instance.isOnline) {
+                            ConnectivityService.showNetworkErrorSnackBar(
+                              context,
+                              customMessage: 'No Internet Connection • Please connect to the internet to place your order',
+                              onRetry: () => ConnectivityService.instance.checkNow(),
+                            );
+                            return;
+                          }
+
                           final formattedPhone = '+91 $tenDigitPhone';
                           final orderId = 'ECO-ORD-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
@@ -1765,7 +2217,9 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                             icon: _currentPhone.icon,
                             deliveryOption: deliveryOption,
                             deliveryAddress: fullAddress,
-                            customerCity: selectedStore.city,
+                            customerCity: AppState.instance.userLocation.city.isNotEmpty
+                                ? AppState.instance.userLocation.city
+                                : selectedStore.city,
                             customerPincode: pincodeController.text.trim().isNotEmpty ? pincodeController.text.trim() : selectedStore.pincode,
                             paymentMethod: paymentMethod,
                             paymentStatus: paymentMethod == 'Cash on Delivery' ? 'Pay on Delivery' : 'Paid Online',
@@ -1783,28 +2237,41 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                           PhoneOrder finalOrder = initialOrder;
                           final isOnline = paymentMethod != 'Cash on Delivery';
 
+                          final String paymentId;
+                          final String rzpOrderId;
                           if (isOnline) {
                             // POS Integration: Simulate/process Razorpay checkout and allocate serialized IMEI from POS
                             final rzpService = RazorpayCheckoutService();
                             final rzpResult = rzpService.generateMockPaymentSuccess();
-                            final paymentId = rzpResult['razorpay_payment_id']!;
-                            final rzpOrderId = rzpResult['razorpay_order_id']!;
-
-                            finalOrder = await AppState.instance.placeOnlineOrder(
-                              order: initialOrder.copyWith(
-                                paymentMethod: 'Online Razorpay ($paymentMethod)',
-                                paymentStatus: 'Paid Online • Verified',
-                              ),
-                              razorpayPaymentId: paymentId,
-                              razorpayOrderId: rzpOrderId,
-                            );
+                            paymentId = rzpResult['razorpay_payment_id']!;
+                            rzpOrderId = rzpResult['razorpay_order_id']!;
                           } else {
-                            AppState.instance.placeOrder(initialOrder);
+                            paymentId = 'pay_COD_${DateTime.now().millisecondsSinceEpoch}';
+                            rzpOrderId = 'order_COD_${DateTime.now().millisecondsSinceEpoch}';
                           }
+
+                          finalOrder = await AppState.instance.placeOnlineOrder(
+                            order: initialOrder.copyWith(
+                              paymentMethod: isOnline ? 'Online Razorpay ($paymentMethod)' : 'Cash on Delivery (COD)',
+                              paymentStatus: isOnline ? 'Paid Online • Verified' : 'Pay after Doorstep Inspection',
+                            ),
+                            razorpayPaymentId: paymentId,
+                            razorpayOrderId: rzpOrderId,
+                          );
 
                           if (!AppState.instance.isLoggedIn) {
                             AppState.instance.login(name: customerName, phone: formattedPhone);
                           }
+
+                          // Update profile details in central DB so address is permanently saved
+                          unawaited(AppState.instance.updateProfileDetails(
+                            name: customerName,
+                            city: AppState.instance.userLocation.city.isNotEmpty
+                                ? AppState.instance.userLocation.city
+                                : selectedStore.city,
+                            area: addressController.text.trim(),
+                            pincode: pincodeController.text.trim(),
+                          ));
 
                           if (!context.mounted) return;
                           Navigator.pop(modalCtx);
@@ -1819,25 +2286,28 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.check_circle_outline_rounded, color: EcoColors.brightAmber, size: 19),
+                            const Icon(Icons.shopping_bag_outlined, color: EcoColors.brightAmber, size: 19),
                             const SizedBox(width: 6),
                             Text(
-                              'Confirm Order • ${_formatPrice(_calculatedRefurbishedPrice)}',
+                              'Place Order • ${_formatPrice(_calculatedRefurbishedPrice)}',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                           ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ], // End of STEP 2
+                ],
               ),
-            );
-          },
-        );
-      },
-    );
-  }
+            ),
+          );
+        },
+      );
+    },
+  ).whenComplete(() {
+    resendTimer?.cancel();
+  });
+}
 
   Widget _buildPaymentTile({
     required IconData icon,
@@ -1962,8 +2432,8 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
             const SizedBox(height: 12),
             Text(
               order.deliveryOption == 'Doorstep Delivery'
-                  ? 'Your order is confirmed! Our courier partner will deliver within 24-48 hours.'
-                  : 'Ready for pickup in 2 hours at ${order.storeName}. Show your Order ID at the counter.',
+                  ? 'Your order has been placed successfully! Our delivery partner will deliver to your doorstep within 24-48 hours.'
+                  : 'Your order has been placed successfully! You can pick it up from ${order.storeName} once ready.',
               textAlign: TextAlign.center,
               style: TextStyle(color: _forestGreen.withOpacity(0.7), fontSize: 11.5, height: 1.3),
             ),

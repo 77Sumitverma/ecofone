@@ -4,10 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:ecofone/core/theme/anim_utils.dart';
 import 'package:ecofone/core/theme/app_theme.dart';
 import 'package:ecofone/core/widgets/brand_logo.dart';
-import 'package:ecofone/screens/directions_sheet.dart';
 import 'package:ecofone/screens/location_sheet.dart';
+import 'package:ecofone/screens/orders_screen.dart';
 import 'package:ecofone/state/app_state.dart';
-import 'package:ecofone/core/widgets/pos_invoice_sheet.dart';
+import 'package:ecofone/services/location_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onTradeInTap;
@@ -27,6 +27,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     AppState.instance.addListener(_onAppStateChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        AppState.instance.refreshOrders();
+      }
+    });
   }
 
   @override
@@ -36,19 +41,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _onAppStateChanged() {
-    if (mounted) setState(() {});
-  }
-
-  String _formatPrice(int price) {
-    final str = price.toString();
-    if (str.length <= 3) return '₹$str';
-    final lastThree = str.substring(str.length - 3);
-    final rest = str.substring(0, str.length - 3);
-    final formattedRest = rest.replaceAllMapped(
-      RegExp(r'\B(?=(\d{2})+(?!\d))'),
-      (match) => ',',
-    );
-    return '₹$formattedRest,$lastThree';
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   String _getInitials(String name) {
@@ -61,7 +58,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final bool isLoggedIn = AppState.instance.isLoggedIn;
-    final orders = AppState.instance.orders;
 
     return Scaffold(
       backgroundColor: _bgColor,
@@ -80,11 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
 
-            // 3. Active Orders & Purchases (If any exist)
-            if (isLoggedIn && orders.isNotEmpty)
-              _buildOrdersSection(orders),
-
-            // 4. Clean Grouped Menu & Actions
+            // 3. Clean Grouped Menu & Actions (Orders are now housed inside dedicated Orders section)
             SliverToBoxAdapter(
               child: FadeSlideEntry(
                 delayMs: 60,
@@ -202,7 +194,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final phone = AppState.instance.userPhone ?? '';
     final email = AppState.instance.userEmail ?? '';
     final initials = _getInitials(name);
-    final activeStore = AppState.instance.selectedStore;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
@@ -297,6 +288,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (AppState.instance.userAlternatePhone != null && AppState.instance.userAlternatePhone!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Alt Contact: +91 ${AppState.instance.userAlternatePhone}',
+                      style: const TextStyle(
+                        color: EcoColors.mintLight,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
@@ -305,7 +309,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      '📍 ${activeStore.area.isNotEmpty ? activeStore.area : activeStore.name}',
+                      '📍 ${AppState.instance.userLocation.fullDisplay}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -417,515 +421,80 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // =========================================================================
-  // 3. ORDERS SECTION (ACTIVE PURCHASES & ORDERS)
-  // =========================================================================
-  Widget _buildOrdersSection(List<PhoneOrder> orders) {
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 2, 20, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.local_mall_outlined, color: _forestGreen, size: 17),
-                    SizedBox(width: 6),
-                    Text(
-                      'My Orders & Purchases',
-                      style: TextStyle(
-                        color: _forestGreen,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: _forestGreen.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '${orders.length} ${orders.length == 1 ? 'Order' : 'Orders'}',
-                    style: const TextStyle(
-                      color: _forestGreen,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ...orders.map((order) => _buildOrderCard(order)),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildOrderCard(PhoneOrder order) {
-    final isDelivery = order.deliveryOption == 'Doorstep Delivery';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.07)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1. Order Top Bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: EcoColors.mintGreen.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.verified_rounded, color: _forestGreen, size: 11),
-                      const SizedBox(width: 4),
-                      Text(
-                        isDelivery ? 'EXPRESS SHIPPING • CONFIRMED' : 'READY FOR STORE PICKUP',
-                        style: const TextStyle(
-                          color: _forestGreen,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _showDigitalReceiptModal(order),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.receipt_long_rounded, size: 14, color: _copper),
-                      const SizedBox(width: 3),
-                      Text(
-                        '#${order.orderId}',
-                        style: const TextStyle(
-                          color: _copper,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
 
-          // 2. Main Phone Overview Row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: _forestGreen.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: order.imageUrl != null && order.imageUrl!.isNotEmpty
-                      ? (order.imageUrl!.startsWith('assets/')
-                          ? Image.asset(order.imageUrl!, fit: BoxFit.contain)
-                          : Image.network(
-                              order.imageUrl!,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.phone_iphone_rounded, color: _forestGreen, size: 24),
-                            ))
-                      : const Icon(Icons.phone_iphone_rounded, color: _forestGreen, size: 24),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        order.phoneName,
-                        style: const TextStyle(
-                          color: _forestGreen,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        '${order.storage} • ${order.color} • Grade ${order.conditionGrade}',
-                        style: TextStyle(
-                          color: _forestGreen.withOpacity(0.6),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _formatPrice(order.price),
-                      style: const TextStyle(
-                        color: _copper,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 14.5,
-                      ),
-                    ),
-                    Text(
-                      order.paymentStatus,
-                      style: const TextStyle(color: EcoColors.mintGreen, fontSize: 9.5, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // 3. Perforated Divider
-          CustomPaint(
-            size: const Size(double.infinity, 12),
-            painter: TicketDividerPainter(
-              color: Colors.grey.shade200,
-              cutoutColor: _bgColor,
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          // 4. Delivery Address / Store Pickup Info
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    isDelivery
-                        ? '🚚 Delivery to: ${order.deliveryAddress}'
-                        : '🏬 Pickup: ${order.storeName}',
-                    style: TextStyle(
-                      color: _forestGreen.withOpacity(0.75),
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // 5. Action Buttons
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-            child: Row(
-              children: [
-                if (!isDelivery) ...[
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => StoreDirectionsSheet.show(context, order.store),
-                      icon: const Icon(Icons.directions_rounded, size: 13, color: _forestGreen),
-                      label: const Text('Route', style: TextStyle(fontSize: 11, color: _forestGreen, fontWeight: FontWeight.bold)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        side: BorderSide(color: _forestGreen.withOpacity(0.25)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: order.storePhone));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('📞 Store phone copied: ${order.storePhone}'),
-                            backgroundColor: _forestGreen,
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.phone_rounded, size: 13, color: Colors.white),
-                      label: const Text('Call Store', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _forestGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _showOrderTrackingDialog(order),
-                      icon: const Icon(Icons.local_shipping_outlined, size: 13, color: _forestGreen),
-                      label: const Text('Track Order', style: TextStyle(fontSize: 11, color: _forestGreen, fontWeight: FontWeight.bold)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        side: BorderSide(color: _forestGreen.withOpacity(0.25)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        PosInvoiceSheet.show(
-                          context,
-                          invoiceNumber: order.invoiceNumber ?? 'ECO-2026-000452',
-                          order: order,
-                        );
-                      },
-                      icon: const Icon(Icons.receipt_long_rounded, size: 13, color: Colors.white),
-                      label: const Text('Tax Invoice & Warranty', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _forestGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: () => _showDigitalReceiptModal(order),
-                  icon: const Icon(Icons.qr_code_2_rounded, size: 18, color: _copper),
-                  tooltip: 'View Digital Receipt',
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  onPressed: () => _showCancelOrderDialog(order.orderId),
-                  icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent, size: 17),
-                  tooltip: 'Cancel Order',
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showOrderTrackingDialog(PhoneOrder order) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (trackCtx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Live Delivery Tracking',
-                      style: TextStyle(
-                        color: _forestGreen,
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      'Order #${order.orderId}',
-                      style: const TextStyle(color: _copper, fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(trackCtx),
-                  icon: const Icon(Icons.close_rounded, color: Colors.grey),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Tracking Milestones
-            _buildTrackingStep(
-              title: 'Order Placed & Verified',
-              subtitle: 'Order successfully confirmed with EcoFone Hub',
-              isCompleted: true,
-              isCurrent: false,
-            ),
-            _buildTrackingStep(
-              title: '32-Point Quality Diagnostic Check',
-              subtitle: 'Battery, display, cameras & hardware inspected & certified',
-              isCompleted: true,
-              isCurrent: false,
-            ),
-            _buildTrackingStep(
-              title: 'Packed & Dispatched for Express Delivery',
-              subtitle: 'Handed over to verified courier partner (Bluedart / Delhivery)',
-              isCompleted: true,
-              isCurrent: true,
-            ),
-            _buildTrackingStep(
-              title: 'Out for Delivery',
-              subtitle: 'Courier executive will arrive at your address',
-              isCompleted: false,
-              isCurrent: false,
-            ),
-            _buildTrackingStep(
-              title: 'Delivered with 6-Month Warranty',
-              subtitle: 'Physical device inspection & unboxing at your doorstep',
-              isCompleted: false,
-              isCurrent: false,
-              isLast: true,
-            ),
-
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: EcoColors.background,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.home_outlined, color: _forestGreen, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Delivery Address: ${order.deliveryAddress}',
-                      style: const TextStyle(color: _forestGreen, fontSize: 11.5, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTrackingStep({
-    required String title,
-    required String subtitle,
-    required bool isCompleted,
-    required bool isCurrent,
-    bool isLast = false,
-  }) {
-    final color = isCompleted ? _forestGreen : (isCurrent ? _copper : Colors.grey.shade400);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isCompleted ? _forestGreen : (isCurrent ? _copper : Colors.grey.shade200),
-              ),
-              child: Center(
-                child: Icon(
-                  isCompleted ? Icons.check_rounded : (isCurrent ? Icons.circle : Icons.radio_button_unchecked_rounded),
-                  size: 13,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 38,
-                color: isCompleted ? _forestGreen : Colors.grey.shade300,
-              ),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: isCurrent || isCompleted ? FontWeight.bold : FontWeight.w500,
-                    fontSize: 12.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(color: Colors.black.withOpacity(0.6), fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 
   // =========================================================================
   // 4. CLEAN GROUPED MENU SECTION
   // =========================================================================
   Widget _buildGroupedMenuSection(bool isLoggedIn) {
+    final orders = AppState.instance.orders;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Group 0: Orders Section (Tapping opens dedicated Orders Screen)
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.black.withOpacity(0.05)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: _buildMenuItem(
+              icon: Icons.local_mall_outlined,
+              iconColor: _forestGreen,
+              title: 'My Orders & Purchases',
+              subtitle: isLoggedIn && orders.isNotEmpty
+                  ? '${orders.length} ${orders.length == 1 ? 'order' : 'orders'} placed • View status & invoices'
+                  : 'Track active deliveries & digital invoices',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isLoggedIn && orders.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _forestGreen.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${orders.length} ${orders.length == 1 ? 'Order' : 'Orders'}',
+                        style: const TextStyle(
+                          color: _forestGreen,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: Colors.grey.shade400,
+                  ),
+                ],
+              ),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const OrdersScreen()),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
           // Group 1: Store & Services
           Container(
             decoration: BoxDecoration(
@@ -1024,6 +593,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String subtitle,
     VoidCallback? onTap,
     bool isDestructive = false,
+    Widget? trailing,
   }) {
     return ListTile(
       onTap: onTap,
@@ -1051,11 +621,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fontSize: 10.5,
         ),
       ),
-      trailing: Icon(
-        Icons.chevron_right_rounded,
-        size: 18,
-        color: Colors.grey.shade400,
-      ),
+      trailing: trailing ??
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: Colors.grey.shade400,
+          ),
     );
   }
 
@@ -1069,139 +640,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // =========================================================================
-  // DIGITAL ORDER RECEIPT & WARRANTY PASS MODAL
-  // =========================================================================
-  void _showDigitalReceiptModal(PhoneOrder order) {
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        contentPadding: const EdgeInsets.all(20),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: _forestGreen,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.verified_rounded, size: 13, color: Colors.white),
-                  SizedBox(width: 5),
-                  Text('CERTIFIED ORDER & WARRANTY PASS', style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
 
-            // Simulated High-Res QR Code Card
-            Container(
-              width: 140,
-              height: 140,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.grey.shade300, width: 1.5),
-              ),
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.qr_code_2_rounded, size: 88, color: _forestGreen),
-                  const SizedBox(height: 2),
-                  Text(
-                    order.orderId,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 0.5),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            Text(
-              order.phoneName,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _forestGreen),
-            ),
-            Text(
-              '${order.storage} • ${order.color} • Grade ${order.conditionGrade}',
-              style: TextStyle(fontSize: 11.5, color: _forestGreen.withOpacity(0.65)),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _bgColor,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    '💰 Amount: ${_formatPrice(order.price)} (${order.paymentMethod})',
-                    style: const TextStyle(fontSize: 11, color: _forestGreen, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '📦 ${order.deliveryOption}\n${order.deliveryAddress}',
-                    style: TextStyle(fontSize: 10, color: Colors.black.withOpacity(0.65)),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(dialogCtx);
-                  PosInvoiceSheet.show(
-                    context,
-                    invoiceNumber: order.invoiceNumber ?? 'ECO-2026-000452',
-                    order: order,
-                  );
-                },
-                icon: const Icon(Icons.receipt_long_rounded, size: 15, color: Colors.white),
-                label: const Text('View Official POS Tax Invoice', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _forestGreen,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 6),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () => Navigator.pop(dialogCtx),
-                child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, color: _forestGreen)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   // =========================================================================
   // OTHER MODALS (LOGIN, EDIT, LOGOUT, SUPPORT, WARRANTY)
   // =========================================================================
   void _showLoginModal() {
     final phoneCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
     final otpCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+    final cityCtrl = TextEditingController(text: 'Lucknow');
+    final areaCtrl = TextEditingController(text: 'Gomti Nagar');
+    final pincodeCtrl = TextEditingController(text: '226010');
+
     bool otpSent = false;
+    bool isNewUserRegistration = false;
     bool isSendingOtp = false;
     bool isVerifying = false;
+    bool isSavingRegistration = false;
+    bool isDetectingLocation = false;
+    String? nameError;
     String? phoneError;
     String? activeDynamicOtp;
     int resendCountdown = 30;
@@ -1257,6 +715,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
+
+                  // Header Row
                   Row(
                     children: [
                       Container(
@@ -1265,7 +725,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           color: _forestGreen.withOpacity(0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.lock_person_rounded, color: _forestGreen, size: 20),
+                        child: Icon(
+                          isNewUserRegistration
+                              ? Icons.assignment_ind_rounded
+                              : (otpSent ? Icons.shield_outlined : Icons.lock_person_rounded),
+                          color: _forestGreen,
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1273,7 +739,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              otpSent ? 'Enter Verification Code' : 'Mobile Login / Sign Up',
+                              isNewUserRegistration
+                                  ? 'Set Delivery Address'
+                                  : (otpSent ? 'Enter Verification Code' : 'Mobile Login / Sign Up'),
                               style: const TextStyle(
                                 color: _forestGreen,
                                 fontWeight: FontWeight.bold,
@@ -1281,9 +749,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             Text(
-                              otpSent
-                                  ? 'Enter 6-digit OTP sent to +91 ${phoneCtrl.text.trim()}'
-                                  : 'Access your orders, tracking & warranty details',
+                              isNewUserRegistration
+                                  ? 'Welcome, ${nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : 'Customer'}! Enter doorstep address'
+                                  : (otpSent
+                                      ? 'Enter 6-digit OTP sent to +91 ${phoneCtrl.text.trim()}'
+                                      : 'Enter your name and 10-digit mobile number'),
                               style: TextStyle(color: _forestGreen.withOpacity(0.6), fontSize: 11.5),
                             ),
                           ],
@@ -1293,15 +763,185 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  if (!otpSent) ...[
+                  // STEP 3: NEW USER REGISTRATION FORM (DELIVERY ADDRESS ONLY)
+                  if (isNewUserRegistration) ...[
+                    // Delivery Location Container
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Row(
+                                children: [
+                                  Icon(Icons.location_on_rounded, size: 16, color: _forestGreen),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Delivery Location',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _forestGreen),
+                                  ),
+                                ],
+                              ),
+                              BouncingWidget(
+                                scaleFactor: 0.95,
+                                onTap: isDetectingLocation
+                                    ? null
+                                    : () async {
+                                        setModalState(() => isDetectingLocation = true);
+                                        try {
+                                          final loc = await LocationService.fetchRealDeviceLocation();
+                                          if (loc != null) {
+                                            setModalState(() {
+                                              cityCtrl.text = loc.city;
+                                              areaCtrl.text = loc.area;
+                                              pincodeCtrl.text = loc.pincode;
+                                            });
+                                          }
+                                        } finally {
+                                          setModalState(() => isDetectingLocation = false);
+                                        }
+                                      },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _forestGreen.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isDetectingLocation)
+                                        const SizedBox(
+                                          width: 10,
+                                          height: 10,
+                                          child: CircularProgressIndicator(strokeWidth: 1.5, color: _forestGreen),
+                                        )
+                                      else
+                                        const Icon(Icons.my_location_rounded, size: 12, color: _forestGreen),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        'Detect GPS',
+                                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: _forestGreen),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Quick City Selection Chips
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: ['Lucknow', 'Gorakhpur', 'Delhi NCR', 'Pune', 'Kanpur'].map((c) {
+                              final isSelected = cityCtrl.text.toLowerCase() == c.toLowerCase();
+                              return ChoiceChip(
+                                label: Text(c, style: TextStyle(fontSize: 10.5, color: isSelected ? Colors.white : Colors.black87)),
+                                selected: isSelected,
+                                selectedColor: _forestGreen,
+                                backgroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                onSelected: (val) {
+                                  if (val) setModalState(() => cityCtrl.text = c);
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 8),
+
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: TextField(
+                                  controller: cityCtrl,
+                                  textCapitalization: TextCapitalization.words,
+                                  decoration: InputDecoration(
+                                    labelText: 'City *',
+                                    isDense: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: pincodeCtrl,
+                                  keyboardType: TextInputType.number,
+                                  maxLength: 6,
+                                  decoration: InputDecoration(
+                                    labelText: 'Pincode *',
+                                    counterText: '',
+                                    isDense: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: areaCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: InputDecoration(
+                              labelText: 'Area / Street / Colony / Landmark *',
+                              hintText: 'e.g. Gomti Nagar, Viram Khand 1',
+                              isDense: true,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              prefixIcon: const Icon(Icons.home_work_outlined, size: 18),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, size: 16, color: _forestGreen),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'You can add your alternate contact number and email anytime in Edit Profile.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ]
+                  // STEP 1: NAME AND PHONE NUMBER ENTRY
+                  else if (!otpSent) ...[
                     TextField(
                       controller: nameCtrl,
                       textCapitalization: TextCapitalization.words,
+                      onChanged: (val) {
+                        if (nameError != null) {
+                          setModalState(() => nameError = null);
+                        }
+                      },
                       decoration: InputDecoration(
-                        labelText: 'Your Full Name (Optional)',
+                        labelText: 'Full Name *',
                         hintText: 'e.g. Rahul Sharma',
+                        errorText: nameError,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.person_outline),
+                        prefixIcon: const Icon(Icons.person_outline_rounded),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -1315,7 +955,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         }
                       },
                       decoration: InputDecoration(
-                        labelText: '10-digit Mobile Number',
+                        labelText: '10-digit Mobile Number *',
                         hintText: '98765 43210',
                         counterText: '',
                         errorText: phoneError,
@@ -1325,7 +965,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         prefixIcon: const Icon(Icons.phone_iphone_rounded),
                       ),
                     ),
-                  ] else ...[
+                  ]
+                  // STEP 2: OTP VERIFICATION
+                  else ...[
                     // Interactive Dynamic OTP Showcase Card
                     if (activeDynamicOtp != null)
                       Container(
@@ -1394,7 +1036,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       style: TextStyle(
                                         color: _forestGreen,
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                       ),
                                     ),
                                   ],
@@ -1410,27 +1052,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 6,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 8,
+                        color: _forestGreen,
+                      ),
                       decoration: InputDecoration(
-                        labelText: 'Enter 6-digit SMS OTP',
+                        labelText: '6-digit SMS OTP',
                         counterText: '',
+                        hintText: '• • • • • •',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.security_rounded),
                       ),
                     ),
                     const SizedBox(height: 8),
 
-                    // Countdown Timer & Change Number Row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         TextButton.icon(
-                          onPressed: () => setModalState(() {
+                          onPressed: () {
                             resendTimer?.cancel();
-                            otpSent = false;
-                            otpCtrl.clear();
-                          }),
-                          icon: const Icon(Icons.edit_outlined, size: 14),
+                            setModalState(() {
+                              otpSent = false;
+                              otpCtrl.clear();
+                            });
+                          },
+                          icon: const Icon(Icons.arrow_back_rounded, size: 14),
                           label: const Text('Change Number', style: TextStyle(fontSize: 12)),
                         ),
                         if (resendCountdown > 0)
@@ -1476,10 +1124,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: (isVerifying || isSendingOtp)
+                      onPressed: (isVerifying || isSendingOtp || isSavingRegistration)
                           ? null
                           : () async {
+                              final messenger = ScaffoldMessenger.of(context);
+
+                              // A. SAVE NEW USER REGISTRATION
+                              if (isNewUserRegistration) {
+                                final name = nameCtrl.text.trim();
+                                if (name.isEmpty) {
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter your full name')));
+                                  return;
+                                }
+
+                                final city = cityCtrl.text.trim();
+                                if (city.isEmpty) {
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(const SnackBar(content: Text('Please select or enter your city')));
+                                  return;
+                                }
+
+                                final area = areaCtrl.text.trim();
+                                if (area.isEmpty) {
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter your area / locality')));
+                                  return;
+                                }
+
+                                final pincode = pincodeCtrl.text.trim();
+                                if (pincode.length != 6) {
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter a valid 6-digit pincode')));
+                                  return;
+                                }
+
+                                setModalState(() => isSavingRegistration = true);
+
+                                final profile = await AppState.instance.completeRegistration(
+                                  name: name,
+                                  phone: phoneCtrl.text.trim(),
+                                  alternatePhone: null,
+                                  city: city,
+                                  area: area,
+                                  pincode: pincode,
+                                );
+
+                                if (sheetCtx.mounted) {
+                                  Navigator.pop(sheetCtx);
+                                }
+
+                                if (mounted) {
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      backgroundColor: _forestGreen,
+                                      duration: const Duration(seconds: 4),
+                                      content: Row(
+                                        children: [
+                                          const Icon(Icons.verified_user_rounded, color: Colors.white, size: 20),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              '🎉 Profile saved! Welcome to EcoFone, ${profile.name}!',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+
+                              // B. SEND OTP (STEP 1)
                               if (!otpSent) {
+                                final name = nameCtrl.text.trim();
+                                if (name.isEmpty) {
+                                  setModalState(() {
+                                    nameError = 'Please enter your full name';
+                                  });
+                                  return;
+                                }
+
                                 final clean = phoneCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
                                 final isValidIndianNumber = RegExp(r'^[6-9]\d{9}$').hasMatch(clean);
 
@@ -1492,6 +1220,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 setModalState(() {
                                   isSendingOtp = true;
+                                  nameError = null;
                                   phoneError = null;
                                 });
 
@@ -1505,23 +1234,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   activeDynamicOtp = generated;
                                 });
                                 startResendTimer(setModalState);
-                              } else {
+                              }
+                              // C. VERIFY OTP
+                              else {
                                 final enteredOtp = otpCtrl.text.trim();
                                 if (enteredOtp.isEmpty || enteredOtp.length < 4) {
-                                  ScaffoldMessenger.of(context).clearSnackBars();
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(
                                     const SnackBar(content: Text('Please enter the 6-digit SMS OTP')),
                                   );
                                   return;
                                 }
 
                                 setModalState(() => isVerifying = true);
-                                final messenger = ScaffoldMessenger.of(context);
 
                                 final profile = await AppState.instance.verifyOtpAndLogin(
                                   phone: phoneCtrl.text.trim(),
                                   otp: enteredOtp,
-                                  name: nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : null,
                                 );
 
                                 if (profile == null) {
@@ -1538,13 +1267,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 resendTimer?.cancel();
 
+                                // If this is a first-time new user, prompt for details!
+                                if (profile.isNewUser) {
+                                  setModalState(() {
+                                    isVerifying = false;
+                                    isNewUserRegistration = true;
+                                  });
+                                  return;
+                                }
+
+                                // Otherwise, this is an existing user: Auto-saved data already loaded!
                                 if (sheetCtx.mounted) {
                                   Navigator.pop(sheetCtx);
                                 }
 
                                 if (mounted) {
                                   final displayName = profile.name;
-                                  final passCount = AppState.instance.reservations.length;
+                                  final loc = AppState.instance.userLocation;
+                                  final locDisplay = loc.area.isNotEmpty ? '${loc.area}, ${loc.city}' : loc.city;
                                   messenger.clearSnackBars();
                                   messenger.showSnackBar(
                                     SnackBar(
@@ -1556,7 +1296,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Text(
-                                              '🎉 Welcome, $displayName! ${passCount > 0 ? '$passCount active orders restored' : 'Logged in successfully'}',
+                                              '🎉 Welcome back, $displayName! Location ($locDisplay) restored.',
                                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                                             ),
                                           ),
@@ -1573,14 +1313,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: (isVerifying || isSendingOtp)
+                      child: (isVerifying || isSendingOtp || isSavingRegistration)
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                             )
                           : Text(
-                              otpSent ? 'Verify & Sync' : 'Send Verification OTP',
+                              isNewUserRegistration
+                                  ? 'Confirm Address & Finish'
+                                  : (otpSent ? 'Verify & Continue' : 'Send Verification OTP'),
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                     ),
@@ -1598,8 +1340,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _showEditProfileModal() {
     final nameCtrl = TextEditingController(text: AppState.instance.userName ?? '');
+    final altPhoneCtrl = TextEditingController(text: AppState.instance.userAlternatePhone ?? '');
     final emailCtrl = TextEditingController(text: AppState.instance.userEmail ?? '');
     final cityCtrl = TextEditingController(text: AppState.instance.userLocation.city);
+    final areaCtrl = TextEditingController(text: AppState.instance.userLocation.area);
     final pincodeCtrl = TextEditingController(text: AppState.instance.userLocation.pincode);
     bool isSaving = false;
 
@@ -1637,7 +1381,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Edit Profile',
+                    'Edit Profile & Delivery Address',
                     style: TextStyle(
                       color: _forestGreen,
                       fontWeight: FontWeight.bold,
@@ -1653,6 +1397,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       labelText: 'Full Name',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       prefixIcon: const Icon(Icons.person_outline),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    controller: altPhoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    decoration: InputDecoration(
+                      labelText: 'Alternate Mobile Contact',
+                      counterText: '',
+                      prefixText: '+91 ',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.phone_iphone_rounded),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1676,7 +1434,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           controller: cityCtrl,
                           textCapitalization: TextCapitalization.words,
                           decoration: InputDecoration(
-                            labelText: 'Preferred City',
+                            labelText: 'City',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                             prefixIcon: const Icon(Icons.location_city_rounded),
                           ),
@@ -1698,6 +1456,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    controller: areaCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: 'Delivery Area / Locality / Street',
+                      hintText: 'e.g. Gomti Nagar, Viram Khand',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.home_work_outlined),
+                    ),
+                  ),
 
                   const SizedBox(height: 18),
                   SizedBox(
@@ -1707,10 +1477,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ? null
                           : () async {
                               final name = nameCtrl.text.trim();
-                              if (name.isEmpty) {
+                              if (name.isEmpty || name.length < 2) {
                                 ScaffoldMessenger.of(context).clearSnackBars();
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please enter your full name')),
+                                  const SnackBar(content: Text('Please enter your full name (minimum 2 characters)')),
+                                );
+                                return;
+                              }
+
+                              final altPhone = altPhoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+                              if (altPhone.isNotEmpty && (altPhone.length != 10 || !RegExp(r'^[6-9]\d{9}$').hasMatch(altPhone))) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Alternate mobile must be a valid 10-digit number (starts with 6-9)')),
+                                );
+                                return;
+                              }
+
+                              final email = emailCtrl.text.trim();
+                              if (email.isNotEmpty && !RegExp(r'^[\w\.-]+@[\w\.-]+\.\w{2,}$').hasMatch(email)) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a valid email address (e.g. name@domain.com)')),
+                                );
+                                return;
+                              }
+
+                              final pin = pincodeCtrl.text.trim();
+                              if (pin.isNotEmpty && (pin.length != 6 || !RegExp(r'^[1-9]\d{5}$').hasMatch(pin))) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a valid 6-digit postal pincode')),
                                 );
                                 return;
                               }
@@ -1720,9 +1517,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                               await AppState.instance.updateProfileDetails(
                                 name: name,
-                                email: emailCtrl.text.trim(),
+                                alternatePhone: altPhone.isNotEmpty ? '+91 $altPhone' : null,
+                                email: email.isNotEmpty ? email : null,
                                 city: cityCtrl.text.trim(),
-                                pincode: pincodeCtrl.text.trim(),
+                                area: areaCtrl.text.trim(),
+                                pincode: pin.isNotEmpty ? pin : null,
                               );
 
                               if (sheetCtx.mounted) {
@@ -1734,7 +1533,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 messenger.showSnackBar(
                                   const SnackBar(
                                     backgroundColor: _forestGreen,
-                                    content: Text('✅ Profile updated successfully!'),
+                                    content: Text('✅ Profile and location updated successfully!'),
                                   ),
                                 );
                               }
@@ -1855,80 +1654,4 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _showCancelOrderDialog(String orderId) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel Order?'),
-        content: Text(
-          'Are you sure you want to cancel order #$orderId? If already paid online, the refund will be automatically processed back to your original payment method within 2-3 working days.',
-          style: const TextStyle(fontSize: 12.5, height: 1.35),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Keep Order'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              AppState.instance.cancelOrder(orderId);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Order #$orderId cancelled successfully.'),
-                  backgroundColor: _forestGreen,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600),
-            child: const Text('Cancel Order', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Custom Perforated Ticket Divider with side circular punchout notches
-class TicketDividerPainter extends CustomPainter {
-  final Color color;
-  final Color cutoutColor;
-
-  TicketDividerPainter({required this.color, required this.cutoutColor});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const notchRadius = 8.0;
-
-    // Draw left cutout circle
-    final notchPaint = Paint()..color = cutoutColor;
-    canvas.drawCircle(Offset(0, size.height / 2), notchRadius, notchPaint);
-
-    // Draw right cutout circle
-    canvas.drawCircle(Offset(size.width, size.height / 2), notchRadius, notchPaint);
-
-    // Draw dashed perforated line
-    final dashPaint = Paint()
-      ..color = color
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke;
-
-    const dashWidth = 4.0;
-    const dashSpace = 3.5;
-    double startX = notchRadius + 4;
-    final endX = size.width - notchRadius - 4;
-
-    while (startX < endX) {
-      canvas.drawLine(
-        Offset(startX, size.height / 2),
-        Offset(startX + dashWidth < endX ? startX + dashWidth : endX, size.height / 2),
-        dashPaint,
-      );
-      startX += dashWidth + dashSpace;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

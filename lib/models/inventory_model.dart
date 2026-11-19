@@ -77,6 +77,22 @@ class PhoneStockItem {
     'isLiveHeldOnBench': isLiveHeldOnBench,
   };
 
+  static IconData _resolveStockIcon(dynamic codePoint, String? brand) {
+    if (codePoint != null) {
+      final cp = codePoint is int ? codePoint : int.tryParse(codePoint.toString());
+      if (cp != null) {
+        if (cp == Icons.phone_iphone_rounded.codePoint) return Icons.phone_iphone_rounded;
+        if (cp == Icons.phone_android_rounded.codePoint) return Icons.phone_android_rounded;
+        if (cp == Icons.tablet_mac_rounded.codePoint) return Icons.tablet_mac_rounded;
+        if (cp == Icons.tablet_android_rounded.codePoint) return Icons.tablet_android_rounded;
+        if (cp == Icons.smartphone_rounded.codePoint) return Icons.smartphone_rounded;
+      }
+    }
+    return (brand?.toLowerCase().contains('apple') ?? false)
+        ? Icons.phone_iphone_rounded
+        : Icons.smartphone_rounded;
+  }
+
   factory PhoneStockItem.fromJson(Map<String, dynamic> json) => PhoneStockItem(
     id: (json['id'] ?? json['product_id'] ?? json['sku']) as String? ?? '',
     sku: (json['sku'] ?? json['id']) as String?,
@@ -94,12 +110,17 @@ class PhoneStockItem {
     refurbishedPrice: (json['refurbishedPrice'] ?? json['refurbished_price'] ?? json['price'] ?? json['selling_price'] as num?)?.toInt() ?? 0,
     originalPrice: (json['originalPrice'] ?? json['original_price'] ?? json['mrp'] as num?)?.toInt() ?? 0,
     stockQuantity: (json['stockQuantity'] ?? json['stock_quantity'] ?? json['quantity'] ?? json['qty'] as num?)?.toInt() ?? 0,
-    icon: json['iconCodePoint'] != null
-        ? IconData(json['iconCodePoint'] as int, fontFamily: 'MaterialIcons')
-        : ((json['brand'] ?? json['manufacturer']) == 'Apple' ? Icons.phone_iphone_rounded : Icons.smartphone_rounded),
+    icon: _resolveStockIcon(json['iconCodePoint'], (json['brand'] ?? json['manufacturer']) as String?),
     highlights: (json['highlights'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-    imageUrl: ((json['imageUrl'] ?? json['image_url'] ?? json['image']) as String?)?.replaceAll('.jpg', '.png'),
-    galleryUrls: (json['galleryUrls'] ?? json['gallery_urls'] as List<dynamic>?)?.map((e) => e.toString().replaceAll('.jpg', '.png')).toList(),
+    imageUrl: () {
+      final raw = (json['imageUrl'] ?? json['image_url'] ?? json['image']) as String?;
+      if (raw == null) return null;
+      return raw.startsWith('assets/') ? raw.replaceAll('.jpg', '.png') : raw;
+    }(),
+    galleryUrls: (json['galleryUrls'] ?? json['gallery_urls'] as List<dynamic>?)?.map((e) {
+      final s = e.toString();
+      return s.startsWith('assets/') ? s.replaceAll('.jpg', '.png') : s;
+    }).toList(),
     isLiveHeldOnBench: (json['isLiveHeldOnBench'] ?? json['is_live_held_on_bench'] ?? json['is_held']) as bool? ?? false,
   );
 

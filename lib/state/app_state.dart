@@ -7,6 +7,7 @@ import 'package:ecofone/models/user_profile.dart';
 import 'package:ecofone/models/reservation_model.dart';
 import 'package:ecofone/models/inventory_model.dart';
 import 'package:ecofone/models/trade_in_model.dart';
+import 'package:ecofone/models/banner_model.dart';
 import 'package:ecofone/services/storage/local_storage_service.dart';
 import 'package:ecofone/services/backend/realtime_backend_service.dart';
 import 'package:ecofone/services/backend/billing_api_service.dart';
@@ -15,6 +16,7 @@ export 'package:ecofone/models/reservation_model.dart';
 export 'package:ecofone/models/user_profile.dart';
 export 'package:ecofone/models/inventory_model.dart';
 export 'package:ecofone/models/trade_in_model.dart';
+export 'package:ecofone/models/banner_model.dart';
 export 'package:ecofone/services/backend/billing_api_service.dart';
 
 /// User's real or selected geographic location
@@ -25,6 +27,7 @@ class UserLocation {
   final double? latitude;
   final double? longitude;
   final bool isGpsDetected;
+  final bool isUserSelected;
 
   const UserLocation({
     required this.city,
@@ -33,6 +36,7 @@ class UserLocation {
     this.latitude,
     this.longitude,
     this.isGpsDetected = false,
+    this.isUserSelected = false,
   });
 
   String get shortDisplay => area.isNotEmpty ? '$area, $city' : '$city ($pincode)';
@@ -125,6 +129,7 @@ class AppState extends ChangeNotifier {
     latitude: 26.8528,
     longitude: 80.9984,
     isGpsDetected: false,
+    isUserSelected: false,
   );
 
   EcoStore? _activeSelectedStore;
@@ -231,6 +236,7 @@ class AppState extends ChangeNotifier {
       latitude: finalLat,
       longitude: finalLng,
       isGpsDetected: false,
+      isUserSelected: true,
     );
 
     // Auto update nearest store for the new city
@@ -254,7 +260,15 @@ class AppState extends ChangeNotifier {
     try {
       final loc = await LocationService.fetchRealDeviceLocation();
       if (loc != null) {
-        userLocation = loc;
+        userLocation = UserLocation(
+          city: loc.city,
+          area: loc.area,
+          pincode: loc.pincode,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          isGpsDetected: true,
+          isUserSelected: true,
+        );
         // Recalculate nearest active store
         _activeSelectedStore = nearestStore;
       }
@@ -679,7 +693,72 @@ class AppState extends ChangeNotifier {
 
   // --- Real-Time Billing & Inventory Catalog State ---
   List<PhoneStockItem> liveInventory = List.from(PhoneStockItem.sampleInventory);
+  List<PhoneStockItem> get allInventory => liveInventory;
   bool isInventoryLoading = false;
+  Timer? _inventoryPollingTimer;
+
+  /// Starts periodic background polling of real-time inventory from POS/Billing database
+  void _startInventoryPolling({Duration interval = const Duration(seconds: 10)}) {
+    _inventoryPollingTimer?.cancel();
+    _inventoryPollingTimer = Timer.periodic(interval, (_) {
+      unawaited(refreshInventory(silent: true));
+    });
+  }
+
+  // --- Dynamic App Hero Banners (Super Admin Managed) ---
+  List<AppBanner> appBanners = List.from(AppBanner.defaultBanners);
+  bool isBannersLoading = false;
+  Timer? _bannerPollingTimer;
+
+  /// Starts periodic background polling of promotional banners so changes from Admin Panel reflect automatically
+  void _startBannerPolling({Duration interval = const Duration(seconds: 15)}) {
+    _bannerPollingTimer?.cancel();
+    _bannerPollingTimer = Timer.periodic(interval, (_) {
+      unawaited(refreshBanners(silent: true));
+    });
+  }
+
+  /// Reloads dynamic home screen hero banners from backend
+  Future<void> refreshBanners({bool silent = false}) async {
+    if (!silent) {
+      isBannersLoading = true;
+      notifyListeners();
+    }
+    try {
+      final banners = await billingApi.fetchBanners();
+      if (banners.isNotEmpty) {
+        final hasChanges = banners.length != appBanners.length ||
+            banners.asMap().entries.any((entry) {
+              final idx = entry.key;
+              final b = entry.value;
+              if (idx >= appBanners.length) return true;
+              final cur = appBanners[idx];
+              return cur.id != b.id ||
+                  cur.title != b.title ||
+                  cur.subtitle != b.subtitle ||
+                  cur.badge != b.badge ||
+                  cur.imageUrl != b.imageUrl ||
+                  cur.gradientStart != b.gradientStart ||
+                  cur.gradientEnd != b.gradientEnd ||
+                  cur.isActive != b.isActive;
+            });
+
+        if (hasChanges) {
+          appBanners = List.from(banners);
+          unawaited(storage?.saveAppBanners(banners));
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('[AppState] refreshBanners error: $e');
+    } finally {
+      if (!silent) {
+        isBannersLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   // --- Customer Orders & Purchases ---
   final List<PhoneOrder> orders = [];
   List<PhoneOrder> get reservations => orders;
@@ -710,22 +789,69 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Reloads latest real-time stock catalog directly from enterprise billing API
-  Future<void> refreshInventory({String? storeId}) async {
-    isInventoryLoading = true;
-    notifyListeners();
+  /// Reloads latest real-time stock catalog directly from enterprise billing API.
+  /// If storeId is null or empty, fetches all inventory across all store hubs.
+  Future<void> refreshInventory({String? storeId, bool silent = false}) async {
+    if (!silent) {
+      isInventoryLoading = true;
+      notifyListeners();
+    }
+    unawaited(refreshBanners(silent: true));
     try {
       if (backend != null) {
-        final items = await backend!.fetchInventory(storeId: storeId ?? selectedStore.id);
+        // If the user is logged out or a new user, or no storeId is explicitly passed,
+        // we deliberately fetch ALL inventory across all stores (storeId: null) so they see the complete real-time catalog.
+        final bool isGuestOrNew = !isLoggedIn || (storage?.getUserProfile()?.isNewUser ?? true);
+        final String? queryStoreId = (storeId != null && storeId.isNotEmpty && storeId != 'all')
+            ? storeId
+            : (isGuestOrNew ? null : null);
+
+        final items = await backend!.fetchInventory(storeId: queryStoreId);
         if (items.isNotEmpty) {
-          liveInventory = List.from(items);
+          final hasChanges = items.length != liveInventory.length ||
+              items.asMap().entries.any((entry) {
+                final idx = entry.key;
+                final itm = entry.value;
+                if (idx >= liveInventory.length) return true;
+                final cur = liveInventory[idx];
+                return cur.id != itm.id ||
+                    cur.refurbishedPrice != itm.refurbishedPrice ||
+                    cur.stockQuantity != itm.stockQuantity ||
+                    cur.conditionGrade != itm.conditionGrade ||
+                    cur.storeId != itm.storeId;
+              });
+
+          if (hasChanges) {
+            liveInventory = List.from(items);
+            notifyListeners();
+          }
         }
       }
     } catch (e) {
       debugPrint('[AppState] refreshInventory error: $e');
     } finally {
-      isInventoryLoading = false;
-      notifyListeners();
+      if (!silent) {
+        isInventoryLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Reloads user's active orders from enterprise billing API to reflect status changes from Dashboard
+  Future<void> refreshOrders() async {
+    final phone = userPhone;
+    if (phone != null && phone.isNotEmpty) {
+      try {
+        final remote = await billingApi.fetchUserOrders(phone);
+        if (remote.isNotEmpty) {
+          orders.clear();
+          orders.addAll(remote);
+          await storage?.saveOrders(orders);
+          notifyListeners();
+        }
+      } catch (e) {
+        debugPrint('[AppState] refreshOrders error: $e');
+      }
     }
   }
 
@@ -750,10 +876,13 @@ class AppState extends ChangeNotifier {
       const envApiKey = String.fromEnvironment('ECOFONE_API_KEY');
       const envFast2SmsKey = String.fromEnvironment('FAST2SMS_API_KEY');
 
+      final effectiveBaseUrl = envBaseUrl.isNotEmpty ? envBaseUrl : 'http://127.0.0.1:8000';
+      final effectiveApiKey = envApiKey.isNotEmpty ? envApiKey : 'eco_test_key_99182';
+
       backend = RealtimeBackendService(
         storage: storage!,
-        baseUrl: envBaseUrl.isNotEmpty ? envBaseUrl : null,
-        apiKey: envApiKey.isNotEmpty ? envApiKey : null,
+        baseUrl: effectiveBaseUrl,
+        apiKey: effectiveApiKey,
         fast2smsApiKey: envFast2SmsKey.isNotEmpty ? envFast2SmsKey : null,
       );
 
@@ -763,9 +892,15 @@ class AppState extends ChangeNotifier {
         isLoggedIn = true;
         userName = profile.name;
         userPhone = profile.phone;
+        userAlternatePhone = profile.alternatePhone;
         userEmail = profile.email;
         if (profile.city != null && profile.city!.isNotEmpty) {
-          setManualLocation(profile.city!, profile.pincode ?? userLocation.pincode);
+          userLocation = UserLocation(
+            city: profile.city!,
+            area: profile.area ?? '',
+            pincode: profile.pincode ?? userLocation.pincode,
+            isUserSelected: true,
+          );
         }
       }
 
@@ -780,6 +915,12 @@ class AppState extends ChangeNotifier {
       wishlistedIds.clear();
       wishlistedIds.addAll(storage!.getWishlist());
 
+      // 3b. Restore cached promotional hero banners
+      final cachedBanners = storage!.getAppBanners();
+      if (cachedBanners.isNotEmpty) {
+        appBanners = List.from(cachedBanners);
+      }
+
       // 4. Listen to real-time cloud orders
       if (userPhone != null && userPhone!.isNotEmpty) {
         _subscribeToOrders(userPhone!);
@@ -788,6 +929,9 @@ class AppState extends ChangeNotifier {
       // 5. Attach live inventory stream from Billing API
       _subscribeToInventory();
       unawaited(refreshInventory());
+      unawaited(refreshBanners());
+      _startBannerPolling();
+      _startInventoryPolling();
 
       isServicesInitialized = true;
       notifyListeners();
@@ -819,8 +963,22 @@ class AppState extends ChangeNotifier {
     orders.removeWhere((o) => o.orderId == order.orderId);
     orders.insert(0, order);
     storage?.saveOrders(orders);
-    backend?.createOrder(order);
     notifyListeners();
+
+    // Ensure order is immediately synchronized to POS & Central Dashboard
+    billingApi.createOnlineOrder(
+      order: order,
+      razorpayPaymentId: order.razorpayPaymentId ?? 'pay_DIRECT_${DateTime.now().millisecondsSinceEpoch}',
+      razorpayOrderId: order.razorpayOrderId ?? '',
+      amount: order.price.toDouble(),
+    ).then((synced) {
+      orders.removeWhere((o) => o.orderId == synced.orderId);
+      orders.insert(0, synced);
+      storage?.saveOrders(orders);
+      notifyListeners();
+    }).catchError((e) {
+      backend?.createOrder(order);
+    });
   }
 
   /// Official EcoFone POS Online Checkout Flow:
@@ -945,7 +1103,7 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
       deliveryAddress: deliveryAddress,
       paymentMethod: paymentMethod,
       paymentStatus: paymentStatus,
-      orderStatus: 'Order Confirmed • Dispatching in 24h',
+      orderStatus: 'PENDING_APPROVAL',
       storeId: store.id,
       storeName: store.name,
       storeAddress: store.address,
@@ -1007,12 +1165,23 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
   void bookInStoreAppointment(InStoreAppointment apt) {
     inStoreAppointments.insert(0, apt);
     notifyListeners();
+    unawaited(billingApi.bookAppointment({
+      'appointmentId': apt.appointmentId,
+      'customerName': apt.customerName,
+      'customerPhone': apt.customerPhone,
+      'storeId': apt.storeId,
+      'storeName': apt.storeName,
+      'serviceType': apt.serviceType,
+      'date': apt.date,
+      'time': apt.timeSlot,
+    }));
   }
 
   // --- Authentication State ---
   bool isLoggedIn = false;
   String? userName;
   String? userPhone;
+  String? userAlternatePhone;
   String? userEmail;
 
   Future<bool> sendOtp(String phone) async {
@@ -1046,20 +1215,28 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
       );
 
       if (profile != null) {
-        isLoggedIn = true;
-        userName = profile.name;
-        userPhone = profile.phone;
-        userEmail = profile.email;
-        if (profile.city != null && profile.city!.isNotEmpty) {
-          setManualLocation(profile.city!, profile.pincode ?? userLocation.pincode);
-        }
+        if (!profile.isNewUser) {
+          isLoggedIn = true;
+          userName = profile.name;
+          userPhone = profile.phone;
+          userAlternatePhone = profile.alternatePhone;
+          userEmail = profile.email;
+          if (profile.city != null && profile.city!.isNotEmpty) {
+            userLocation = UserLocation(
+              city: profile.city!,
+              area: profile.area ?? '',
+              pincode: profile.pincode ?? userLocation.pincode,
+              isUserSelected: true,
+            );
+          }
 
-        // Sync and stream reservations
-        if (userPhone != null && userPhone!.isNotEmpty) {
-          _subscribeToReservations(userPhone!);
-        }
+          // Sync and stream reservations
+          if (userPhone != null && userPhone!.isNotEmpty) {
+            _subscribeToReservations(userPhone!);
+          }
 
-        notifyListeners();
+          notifyListeners();
+        }
         return profile;
       }
       return null;
@@ -1069,7 +1246,77 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     if (!isMockValid) return null;
 
     login(name: name ?? 'Customer', phone: formattedPhone);
-    return storage?.getUserProfile();
+    return storage?.getUserProfile() ??
+        UserProfile(
+          phone: formattedPhone,
+          name: name ?? 'Customer',
+          lastLoginAt: DateTime.now(),
+          isNewUser: false,
+        );
+  }
+
+  /// Completes registration for a first-time sign-up customer
+  Future<UserProfile> completeRegistration({
+    required String name,
+    required String phone,
+    String? alternatePhone,
+    required String city,
+    required String area,
+    required String pincode,
+    String? email,
+  }) async {
+    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    final tenDigits = cleanDigits.length >= 10
+        ? cleanDigits.substring(cleanDigits.length - 10)
+        : cleanDigits;
+    final formattedPhone = '+91 $tenDigits';
+
+    final cleanAlt = alternatePhone?.replaceAll(RegExp(r'[^0-9]'), '') ?? '';
+    final tenDigitAlt = cleanAlt.length >= 10
+        ? cleanAlt.substring(cleanAlt.length - 10)
+        : cleanAlt;
+
+    final resolvedEmail = (email != null && email.trim().isNotEmpty) ? email.trim() : '$tenDigits@ecofone.in';
+
+    final profile = UserProfile(
+      name: name.trim(),
+      phone: formattedPhone,
+      alternatePhone: tenDigitAlt.isNotEmpty ? tenDigitAlt : null,
+      email: resolvedEmail,
+      city: city.trim(),
+      area: area.trim(),
+      pincode: pincode.trim(),
+      token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
+      lastLoginAt: DateTime.now(),
+      isNewUser: false,
+    );
+
+    isLoggedIn = true;
+    userName = profile.name;
+    userPhone = profile.phone;
+    userAlternatePhone = profile.alternatePhone;
+    userEmail = profile.email;
+    userLocation = UserLocation(
+      city: profile.city!,
+      area: profile.area ?? '',
+      pincode: profile.pincode ?? '226010',
+      isUserSelected: true,
+    );
+
+    await storage?.saveUserProfile(profile);
+    if (backend != null) {
+      await backend!.updateUserProfile(profile);
+    } else {
+      unawaited(billingApi.syncUser(profile: profile));
+    }
+
+    if (userPhone != null && userPhone!.isNotEmpty) {
+      _subscribeToReservations(userPhone!);
+    }
+    unawaited(refreshInventory(storeId: null, silent: true));
+
+    notifyListeners();
+    return profile;
   }
 
   void login({
@@ -1106,38 +1353,55 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     if (userPhone != null && userPhone!.isNotEmpty) {
       _subscribeToReservations(userPhone!);
     }
+    unawaited(refreshInventory(storeId: null, silent: true));
 
     notifyListeners();
   }
 
-  /// Update user profile details and sync immediately with Cloud Firestore
+  /// Update user profile details and sync immediately with Central Backend & Cloud Firestore
   Future<void> updateProfileDetails({
     required String name,
+    String? alternatePhone,
     String? email,
     String? city,
+    String? area,
     String? pincode,
   }) async {
     userName = name.trim().isEmpty ? 'Valued Customer' : name.trim();
+    if (alternatePhone != null) {
+      final cleanAlt = alternatePhone.replaceAll(RegExp(r'[^0-9]'), '');
+      userAlternatePhone = cleanAlt.length >= 10 ? cleanAlt.substring(cleanAlt.length - 10) : (cleanAlt.isNotEmpty ? cleanAlt : null);
+    }
     if (email != null && email.trim().isNotEmpty) {
       userEmail = email.trim();
     }
     if (city != null && city.trim().isNotEmpty) {
-      setManualLocation(city.trim(), pincode?.trim() ?? userLocation.pincode);
+      userLocation = UserLocation(
+        city: city.trim(),
+        area: (area != null && area.trim().isNotEmpty) ? area.trim() : userLocation.area,
+        pincode: pincode?.trim() ?? userLocation.pincode,
+        isUserSelected: true,
+      );
     }
 
     final updatedProfile = UserProfile(
       name: userName!,
       phone: userPhone ?? '',
+      alternatePhone: userAlternatePhone,
       email: userEmail,
       city: city?.trim() ?? userLocation.city,
+      area: (area != null && area.trim().isNotEmpty) ? area.trim() : userLocation.area,
       pincode: pincode?.trim() ?? userLocation.pincode,
       token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
       lastLoginAt: DateTime.now(),
+      isNewUser: false,
     );
 
     await storage?.saveUserProfile(updatedProfile);
     if (backend != null) {
       await backend!.updateUserProfile(updatedProfile);
+    } else {
+      unawaited(billingApi.syncUser(profile: updatedProfile));
     }
     notifyListeners();
   }
@@ -1146,17 +1410,22 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     isLoggedIn = false;
     userName = null;
     userPhone = null;
+    userAlternatePhone = null;
     userEmail = null;
     reservations.clear();
     _reservationsSubscription?.cancel();
     _reservationsSubscription = null;
+    backend?.stopOrdersStream();
     storage?.clearAuthSession();
     storage?.saveReservations([]);
+
+    // Immediately reload all real-time inventory from all stores for guest / logged-out user
+    unawaited(refreshInventory(storeId: null, silent: false));
     notifyListeners();
   }
 
   // --- Shared Wishlist ---
-  final Set<String> wishlistedIds = {'EF-101', 'EF-103', 'EF-105'};
+  final Set<String> wishlistedIds = {};
 
   void toggleWishlist(String id) {
     if (wishlistedIds.contains(id)) {

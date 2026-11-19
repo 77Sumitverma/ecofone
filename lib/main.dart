@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:ecofone/core/theme/app_theme.dart';
+import 'package:ecofone/core/widgets/connectivity_banner_overlay.dart';
 import 'package:ecofone/screens/home_screen.dart';
 import 'package:ecofone/screens/onboarding_screen.dart';
 import 'package:ecofone/screens/splash_page.dart';
 import 'package:ecofone/screens/stock_screen.dart';
 import 'package:ecofone/screens/trade_in_screen.dart';
+import 'package:ecofone/screens/orders_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:ecofone/firebase_options.dart';
 import 'package:ecofone/state/app_state.dart';
@@ -67,6 +69,11 @@ class EcoFoneApp extends StatelessWidget {
           },
         ),
       ),
+      builder: (context, child) {
+        return ConnectivityBannerOverlay(
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       initialRoute: '/home',
       routes: {
         '/splash': (context) => const SplashPage(),
@@ -74,6 +81,7 @@ class EcoFoneApp extends StatelessWidget {
         '/home': (context) => const HomePage(),
         '/stock': (context) => const StockScreen(),
         '/trade_in': (context) => const TradeInScreen(),
+        '/orders': (context) => const OrdersScreen(),
       },
     );
   }

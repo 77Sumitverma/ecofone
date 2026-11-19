@@ -9,6 +9,7 @@ import 'package:ecofone/models/user_profile.dart';
 import 'package:ecofone/models/order_model.dart';
 import 'package:ecofone/models/inventory_model.dart';
 import 'package:ecofone/models/trade_in_model.dart';
+import 'package:ecofone/models/banner_model.dart';
 import 'package:ecofone/services/backend/backend_service.dart';
 import 'package:ecofone/services/backend/billing_api_service.dart';
 import 'package:ecofone/services/storage/local_storage_service.dart';
@@ -37,6 +38,7 @@ class RealtimeBackendService implements BackendService {
   List<PhoneStockItem> _currentInventory = List.from(PhoneStockItem.sampleInventory);
   List<PhoneOrder> _currentOrders = [];
   StreamSubscription? _firestoreOrdersSub;
+  Timer? _ordersPollingTimer;
 
   RealtimeBackendService({
     required this.storage,
@@ -113,7 +115,16 @@ class RealtimeBackendService implements BackendService {
       }
     });
 
-    // Attach real-time Cloud Firestore snapshot listener
+    // 1. Initial REST API sync from Central Operations Backend
+    _syncOrdersFromBackend(userPhone);
+
+    // 2. Periodic background poll from Central Backend (every 10 seconds for timely dashboard status reflection)
+    _ordersPollingTimer?.cancel();
+    _ordersPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _syncOrdersFromBackend(userPhone);
+    });
+
+    // 3. Attach real-time Cloud Firestore snapshot listener (if available)
     try {
       _firestoreOrdersSub?.cancel();
       final phoneVariations = {formattedPhone, userPhone, tenDigit, '+91$tenDigit'}.toList();
@@ -142,6 +153,35 @@ class RealtimeBackendService implements BackendService {
     }
 
     return _ordersStreamController.stream;
+  }
+
+  Future<void> _syncOrdersFromBackend(String userPhone) async {
+    try {
+      final remoteOrders = await billingApi.fetchUserOrders(userPhone);
+      if (remoteOrders.isNotEmpty) {
+        bool hasChanges = false;
+        if (_currentOrders.length != remoteOrders.length) {
+          hasChanges = true;
+        } else {
+          for (final ro in remoteOrders) {
+            final local = _currentOrders.where((lo) => lo.orderId == ro.orderId).firstOrNull;
+            if (local == null || local.orderStatus != ro.orderStatus) {
+              hasChanges = true;
+              break;
+            }
+          }
+        }
+        if (hasChanges) {
+          _currentOrders = remoteOrders;
+          await storage.saveOrders(_currentOrders);
+          if (!_ordersStreamController.isClosed) {
+            _ordersStreamController.add(List.unmodifiable(_currentOrders));
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[RealtimeBackend] _syncOrdersFromBackend error: $e');
+    }
   }
 
   @override
@@ -198,39 +238,71 @@ class RealtimeBackendService implements BackendService {
         return null;
       }
 
-      String resolvedName = (name != null && name.trim().isNotEmpty) ? name.trim() : 'Valued Customer';
+      String resolvedName = (name != null && name.trim().isNotEmpty) ? name.trim() : '';
       String? resolvedEmail = '$tenDigit@ecofone.in';
       String? resolvedCity;
+      String? resolvedArea;
       String? resolvedPincode;
+      String? resolvedAlternatePhone;
+      bool isNewUserDetected = false;
 
-      // 1. Check Cloud Firestore for existing user profile & saved data
+      // 1. Check Central Backend Database (Primary Source of Truth)
       try {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(tenDigit)
-            .get();
-
-        if (userDoc.exists && userDoc.data() != null) {
-          final data = userDoc.data()!;
-          if ((name == null || name.trim().isEmpty) && data['name'] != null) {
-            resolvedName = data['name'] as String;
+        final backendUser = await billingApi.lookupUser(formattedPhone);
+        if (backendUser != null) {
+          if (backendUser.isNewUser) {
+            isNewUserDetected = true;
+          } else {
+            if (backendUser.name.isNotEmpty) resolvedName = backendUser.name;
+            if (backendUser.email != null && backendUser.email!.isNotEmpty) resolvedEmail = backendUser.email;
+            if (backendUser.city != null && backendUser.city!.isNotEmpty) resolvedCity = backendUser.city;
+            if (backendUser.area != null && backendUser.area!.isNotEmpty) resolvedArea = backendUser.area;
+            if (backendUser.pincode != null && backendUser.pincode!.isNotEmpty) resolvedPincode = backendUser.pincode;
+            if (backendUser.alternatePhone != null && backendUser.alternatePhone!.isNotEmpty) {
+              resolvedAlternatePhone = backendUser.alternatePhone;
+            }
+            debugPrint('[RealtimeBackend] Found existing user in Central DB: $resolvedName, Loc: $resolvedArea, $resolvedCity ($resolvedPincode), Alt: $resolvedAlternatePhone');
           }
-          if (data['email'] != null) {
-            resolvedEmail = data['email'] as String;
-          }
-          if (data['city'] != null) {
-            resolvedCity = data['city'] as String;
-          }
-          if (data['pincode'] != null) {
-            resolvedPincode = data['pincode'] as String;
-          }
-          debugPrint('[RealtimeBackend] Restored existing user profile from Cloud Firestore: $resolvedName ($resolvedCity)');
         }
       } catch (e) {
-        debugPrint('[RealtimeBackend] Firestore profile lookup fallback: $e');
+        debugPrint('[RealtimeBackend] Central DB user lookup fallback: $e');
       }
 
-      // 2. Fetch and restore all previous orders for this phone number from Cloud Firestore
+      // 2. Check Cloud Firestore if not found in central DB
+      if (!isNewUserDetected && resolvedName.isEmpty) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(tenDigit)
+              .get();
+
+          if (userDoc.exists && userDoc.data() != null) {
+            final data = userDoc.data()!;
+            if (data['name'] != null && (data['name'] as String).isNotEmpty) {
+              resolvedName = data['name'] as String;
+            }
+            if (data['email'] != null) resolvedEmail = data['email'] as String;
+            if (data['city'] != null) resolvedCity = data['city'] as String;
+            if (data['area'] != null) resolvedArea = data['area'] as String;
+            if (data['pincode'] != null) resolvedPincode = data['pincode'] as String;
+            if (data['alternatePhone'] != null || data['alternate_phone'] != null) {
+              resolvedAlternatePhone = (data['alternatePhone'] ?? data['alternate_phone']) as String?;
+            }
+            debugPrint('[RealtimeBackend] Restored user profile from Cloud Firestore: $resolvedName');
+          } else {
+            isNewUserDetected = true;
+          }
+        } catch (e) {
+          debugPrint('[RealtimeBackend] Firestore profile lookup fallback: $e');
+        }
+      }
+
+      // If user had no recorded profile anywhere, they are definitely a new user
+      if (resolvedName.isEmpty && (resolvedCity == null || resolvedCity.isEmpty)) {
+        isNewUserDetected = true;
+      }
+
+      // 3. Fetch and restore all previous orders for this phone number from Cloud Firestore
       try {
         final phoneVariations = {formattedPhone, phoneNumber, tenDigit, '+91$tenDigit', '91$tenDigit'}.toList();
         final orderSnapshot = await FirebaseFirestore.instance
@@ -255,19 +327,24 @@ class RealtimeBackendService implements BackendService {
         debugPrint('[RealtimeBackend] Firestore orders restore fallback: $e');
       }
 
-      // 3. Create active UserProfile
+      // 4. Create active UserProfile
       final profile = UserProfile(
-        name: resolvedName,
+        name: resolvedName.isNotEmpty ? resolvedName : (name ?? 'Valued Customer'),
         phone: formattedPhone,
+        alternatePhone: resolvedAlternatePhone,
         email: resolvedEmail,
         city: resolvedCity,
+        area: resolvedArea,
         pincode: resolvedPincode,
         token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
         lastLoginAt: DateTime.now(),
+        isNewUser: isNewUserDetected,
       );
 
-      await storage.saveUserProfile(profile);
-      _syncProfileToFirestore(profile);
+      if (!isNewUserDetected) {
+        await storage.saveUserProfile(profile);
+        _syncProfileToFirestore(profile);
+      }
       return profile;
     } catch (e) {
       debugPrint('[RealtimeBackend] verifyOtpAndLogin error: $e');
@@ -280,6 +357,7 @@ class RealtimeBackendService implements BackendService {
     try {
       await storage.saveUserProfile(profile);
       _syncProfileToFirestore(profile);
+      unawaited(billingApi.syncUser(profile: profile));
       return true;
     } catch (e) {
       debugPrint('[RealtimeBackend] updateUserProfile error: $e');
@@ -500,8 +578,21 @@ _Sent automatically via EcoFone Real-Time E-Commerce Cloud_''';
   }
 
   @override
-  void dispose() {
+  Future<List<AppBanner>> fetchAppBanners() async {
+    return await billingApi.fetchBanners();
+  }
+
+  @override
+  void stopOrdersStream() {
+    _ordersPollingTimer?.cancel();
+    _ordersPollingTimer = null;
     _firestoreOrdersSub?.cancel();
+    _firestoreOrdersSub = null;
+  }
+
+  @override
+  void dispose() {
+    stopOrdersStream();
     _inventoryStreamController.close();
     _ordersStreamController.close();
     billingApi.dispose();

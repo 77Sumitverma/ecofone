@@ -64,7 +64,11 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
   }
 
   void _onAppStateChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
@@ -514,12 +518,16 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                       children: [
                         const Icon(Icons.access_time_filled_rounded, size: 14, color: _softGreen),
                         const SizedBox(width: 5),
-                        Text(
-                          store.timings,
-                          style: const TextStyle(
-                            color: _softGreen,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11.5,
+                        Expanded(
+                          child: Text(
+                            store.timings,
+                            style: const TextStyle(
+                              color: _softGreen,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11.5,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -579,11 +587,14 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                           child: OutlinedButton.icon(
                             onPressed: () => _showDirectionsSheet(store),
                             icon: const Icon(Icons.directions_rounded, size: 16, color: _forestGreen),
-                            label: const Text('Directions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('Directions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _forestGreen,
                               side: const BorderSide(color: _forestGreen),
-                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           ),
@@ -593,11 +604,14 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                           child: OutlinedButton.icon(
                             onPressed: () => _showCallStoreDialog(store),
                             icon: const Icon(Icons.phone_outlined, size: 16, color: _copper),
-                            label: const Text('Call Desk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('Call Desk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _copper,
                               side: const BorderSide(color: _copper),
-                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           ),
@@ -608,11 +622,14 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                           child: ElevatedButton.icon(
                             onPressed: () => _showInStoreAppointmentModal(store),
                             icon: const Icon(Icons.event_available_rounded, size: 16, color: Colors.white),
-                            label: const Text('Book Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('Book Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: _forestGreen,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           ),
@@ -1100,20 +1117,23 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                   // Date & Time Slot
                   const Text('Select Date & Time:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _forestGreen)),
                   const SizedBox(height: 6),
-                  Row(
-                    children: dates.map((d) {
-                      final isSel = d == selectedDate;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(d, style: TextStyle(fontSize: 11, color: isSel ? Colors.white : _forestGreen, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                          selected: isSel,
-                          selectedColor: _copper,
-                          backgroundColor: _bgColor,
-                          onSelected: (val) => setModalState(() => selectedDate = d),
-                        ),
-                      );
-                    }).toList(),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: dates.map((d) {
+                        final isSel = d == selectedDate;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(d, style: TextStyle(fontSize: 11, color: isSel ? Colors.white : _forestGreen, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                            selected: isSel,
+                            selectedColor: _copper,
+                            backgroundColor: _bgColor,
+                            onSelected: (val) => setModalState(() => selectedDate = d),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Wrap(
@@ -1155,9 +1175,35 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
+                        final customerName = nameCtrl.text.trim().isEmpty
+                            ? (AppState.instance.userName ?? '')
+                            : nameCtrl.text.trim();
+                        if (customerName.isEmpty || customerName.length < 2) {
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please enter your full name for the in-store VIP pass'),
+                              backgroundColor: EcoColors.vibrantOrange,
+                            ),
+                          );
+                          return;
+                        }
+
+                        final rawDigits = phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+                        final tenDigit = rawDigits.length >= 10 ? rawDigits.substring(rawDigits.length - 10) : rawDigits;
+                        if (tenDigit.length != 10 || !RegExp(r'^[6-9]\d{9}$').hasMatch(tenDigit)) {
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9)'),
+                              backgroundColor: EcoColors.vibrantOrange,
+                            ),
+                          );
+                          return;
+                        }
+
                         final aptId = 'ECO-VIP-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
-                        final customerName = nameCtrl.text.trim().isEmpty ? (AppState.instance.userName ?? 'Valued Customer') : nameCtrl.text.trim();
-                        final customerPhone = phoneCtrl.text.trim().isEmpty ? (AppState.instance.userPhone ?? '+91 98765 43210') : phoneCtrl.text.trim();
+                        final customerPhone = '+91 $tenDigit';
 
                         final appointment = InStoreAppointment(
                           appointmentId: aptId,
@@ -1172,7 +1218,7 @@ class _ExploreScreenState extends State<ExploreScreen> with SingleTickerProvider
                         );
                         AppState.instance.bookInStoreAppointment(appointment);
 
-                        if (!AppState.instance.isLoggedIn && phoneCtrl.text.trim().isNotEmpty) {
+                        if (!AppState.instance.isLoggedIn) {
                           AppState.instance.login(name: customerName, phone: customerPhone);
                         }
 

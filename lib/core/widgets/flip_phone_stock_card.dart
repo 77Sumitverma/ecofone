@@ -267,7 +267,7 @@ class _FlipPhoneStockCardState extends State<FlipPhoneStockCard>
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: _forestGreen.withOpacity(0.035),
+                    color: const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Center(
@@ -276,8 +276,8 @@ class _FlipPhoneStockCardState extends State<FlipPhoneStockCard>
                       colorName: item.color,
                       batteryHealth: item.batteryHealth,
                       realImageUrl: item.imageUrl,
-                      width: 88,
-                      height: 126,
+                      width: 96,
+                      height: 130,
                     ),
                   ),
                 ),
@@ -312,21 +312,23 @@ class _FlipPhoneStockCardState extends State<FlipPhoneStockCard>
               const SizedBox(height: 6),
 
               // Price & Discount Row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    _formatPrice(item.refurbishedPrice),
-                    style: const TextStyle(
-                      color: _copper,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14.5,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      _formatPrice(item.refurbishedPrice),
+                      style: const TextStyle(
+                        color: _copper,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14.5,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
+                    const SizedBox(width: 4),
+                    Text(
                       _formatPrice(item.originalPrice),
                       style: TextStyle(
                         color: Colors.grey.shade400,
@@ -336,24 +338,24 @@ class _FlipPhoneStockCardState extends State<FlipPhoneStockCard>
                       maxLines: 1,
                       overflow: TextOverflow.clip,
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: EcoColors.softOrange,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      '${item.savingsPercent}%',
-                      style: const TextStyle(
-                        color: EcoColors.vibrantOrange,
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: EcoColors.softOrange,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        '${item.savingsPercent}%',
+                        style: const TextStyle(
+                          color: EcoColors.vibrantOrange,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: 5),
 
@@ -399,20 +401,23 @@ class _FlipPhoneStockCardState extends State<FlipPhoneStockCard>
                       ),
                     ],
                   ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.shopping_bag_rounded, size: 13, color: EcoColors.brightAmber),
-                      SizedBox(width: 4),
-                      Text(
-                        'Buy Now',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                  child: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.shopping_bag_rounded, size: 13, color: EcoColors.brightAmber),
+                        SizedBox(width: 4),
+                        Text(
+                          'Buy Now',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

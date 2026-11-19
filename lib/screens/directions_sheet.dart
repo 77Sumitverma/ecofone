@@ -258,7 +258,7 @@ class _StoreDirectionsSheetState extends State<StoreDirectionsSheet>
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(
+                        Expanded( 
                           child: Text(
                             userLoc.shortDisplay,
                             style: const TextStyle(
@@ -444,15 +444,18 @@ class _StoreDirectionsSheetState extends State<StoreDirectionsSheet>
                         );
                       },
                       icon: const Icon(Icons.phone_rounded, size: 15, color: _forestGreen),
-                      label: Text(
-                        'Call: ${store.phone}',
-                        style: const TextStyle(fontSize: 11.5, color: _forestGreen, fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Call: ${store.phone}',
+                          style: const TextStyle(fontSize: 11.5, color: _forestGreen, fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: _forestGreen.withOpacity(0.3)),
-                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                     ),

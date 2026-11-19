@@ -50,9 +50,9 @@ class _SplashPageState extends State<SplashPage>
     if (!_precached) {
       _precached = true;
       for (final item in PhoneStockItem.sampleInventory) {
-        final url = item.imageUrl?.replaceAll('.jpg', '.png');
-        if (url != null && url.isNotEmpty) {
-          precacheImage(AssetImage(url), context);
+        final url = item.imageUrl;
+        if (url != null && url.isNotEmpty && url.startsWith('assets/')) {
+          precacheImage(AssetImage(url.replaceAll('.jpg', '.png')), context);
         }
       }
     }

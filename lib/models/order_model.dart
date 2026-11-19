@@ -40,6 +40,10 @@ class PhoneOrder {
   final String? invoiceUrl;        // e.g. "/api/online/invoice/ECO-2026-000452"
   final String? razorpayPaymentId; // Idempotency key (e.g. "pay_O7xKwXv983LmQ1")
   final String? razorpayOrderId;   // e.g. "order_O7xK3Yy456AbCd"
+  final String? suggestedStoreId;  // Auto-calculated nearest physical store
+  final double? suggestedDistanceKm;
+  final String? approvalNotes;
+  final String? approvedBy;
 
   const PhoneOrder({
     required this.orderId,
@@ -56,7 +60,7 @@ class PhoneOrder {
     this.deliveryAddress = 'Home Delivery Address',
     this.paymentMethod = 'Cash on Delivery (COD)',
     this.paymentStatus = 'Pay after Doorstep Inspection',
-    this.orderStatus = 'Order Confirmed • Dispatching in 24h',
+    this.orderStatus = 'Order Requested • Awaiting Approval',
     this.storeId = 'EF-STORE-LKO-01',
     this.storeName = 'EcoFone Flagship Hub',
     this.storeAddress = 'Transport Nagar, Lucknow',
@@ -77,6 +81,10 @@ class PhoneOrder {
     this.invoiceUrl,
     this.razorpayPaymentId,
     this.razorpayOrderId,
+    this.suggestedStoreId,
+    this.suggestedDistanceKm,
+    this.approvalNotes,
+    this.approvedBy,
   });
 
   // Backward-compatibility getters
@@ -86,6 +94,37 @@ class PhoneOrder {
   String get date => '1-2 Business Days';
   String get timeSlot => deliveryOption;
   String get visitDate => date;
+
+  String get effectiveImageUrl {
+    if (imageUrl != null && imageUrl!.isNotEmpty) return imageUrl!;
+    final nameLower = phoneName.toLowerCase();
+    if (nameLower.contains('pixel 7 pro')) return 'assets/phones/pixel_7_pro.png';
+    if (nameLower.contains('pixel 6') || nameLower.contains('pixel')) return 'assets/phones/pixel_6a.png';
+    if (nameLower.contains('s23 ultra') || (nameLower.contains('galaxy') && nameLower.contains('s23'))) {
+      return 'assets/phones/galaxy_s23_ultra.png';
+    }
+    if (nameLower.contains('flip')) return 'assets/phones/galaxy_z_flip_4.png';
+    if (nameLower.contains('iphone 14 pro') || nameLower.contains('14 pro')) {
+      return 'assets/phones/iphone_14_pro.png';
+    }
+    if (nameLower.contains('iphone 13') || nameLower.contains('13')) {
+      return 'assets/phones/iphone_13.png';
+    }
+    if (nameLower.contains('iphone 12') || nameLower.contains('12')) {
+      return 'assets/phones/iphone_12.png';
+    }
+    if (nameLower.contains('iphone 11') || nameLower.contains('11')) {
+      return 'assets/phones/iphone_11.png';
+    }
+    if (nameLower.contains('oneplus 11') || nameLower.contains('oneplus')) {
+      return 'assets/phones/oneplus_11.png';
+    }
+    if (nameLower.contains('nord')) return 'assets/phones/oneplus_nord_ce_2_lite.png';
+    if (nameLower.contains('redmi') || nameLower.contains('note 12')) {
+      return 'assets/phones/redmi_note_12_pro.png';
+    }
+    return 'assets/phones/pixel_7_pro.png';
+  }
 
   EcoStore get store {
     final matching = AppState.allStores.where((s) => s.id == storeId).toList();
@@ -151,48 +190,76 @@ class PhoneOrder {
     'invoiceUrl': invoiceUrl,
     'razorpayPaymentId': razorpayPaymentId,
     'razorpayOrderId': razorpayOrderId,
+    'suggestedStoreId': suggestedStoreId,
+    'suggested_store_id': suggestedStoreId,
+    'suggestedDistanceKm': suggestedDistanceKm,
+    'suggested_distance_km': suggestedDistanceKm,
+    'approvalNotes': approvalNotes,
+    'approval_notes': approvalNotes,
+    'approvedBy': approvedBy,
+    'approved_by': approvedBy,
   };
 
+  static IconData _resolveOrderIcon(dynamic codePoint, String? brand) {
+    if (codePoint != null) {
+      final cp = codePoint is int ? codePoint : int.tryParse(codePoint.toString());
+      if (cp != null) {
+        if (cp == Icons.phone_iphone_rounded.codePoint) return Icons.phone_iphone_rounded;
+        if (cp == Icons.phone_android_rounded.codePoint) return Icons.phone_android_rounded;
+        if (cp == Icons.tablet_mac_rounded.codePoint) return Icons.tablet_mac_rounded;
+        if (cp == Icons.tablet_android_rounded.codePoint) return Icons.tablet_android_rounded;
+        if (cp == Icons.smartphone_rounded.codePoint) return Icons.smartphone_rounded;
+      }
+    }
+    return (brand?.toLowerCase().contains('apple') ?? false)
+        ? Icons.phone_iphone_rounded
+        : Icons.smartphone_rounded;
+  }
+
   factory PhoneOrder.fromJson(Map<String, dynamic> json) => PhoneOrder(
-    orderId: (json['orderId'] ?? json['reservationId'] ?? 'ECO-ORD-000') as String,
-    phoneId: json['phoneId'] as String? ?? '',
-    phoneName: (json['phoneName'] ?? json['product_name'] ?? 'Smartphone') as String,
-    brand: json['brand'] as String? ?? 'Premium',
-    storage: json['storage'] as String? ?? '128 GB',
-    color: json['color'] as String? ?? 'Default',
+    orderId: (json['orderId'] ?? json['order_id'] ?? json['reservationId'] ?? 'ECO-ORD-000') as String,
+    phoneId: (json['phoneId'] ?? json['phone_id'] ?? json['sku'] ?? '') as String,
+    phoneName: (json['phoneName'] ?? json['model'] ?? json['product_name'] ?? 'Smartphone') as String,
+    brand: (json['brand'] ?? json['manufacturer'] ?? 'Premium') as String,
+    storage: (json['storage'] ?? json['capacity'] ?? '128 GB') as String,
+    color: (json['color'] ?? 'Default') as String,
     price: (json['price'] as num?)?.toInt() ?? 0,
-    conditionGrade: json['conditionGrade'] as String? ?? 'Superb (Pristine)',
+    conditionGrade: (json['conditionGrade'] ?? json['condition_grade'] ?? json['grade'] ?? 'Superb (Pristine)') as String,
     imageUrl: (json['imageUrl'] ?? json['image_url']) as String?,
-    icon: json['iconCodePoint'] != null
-        ? IconData(json['iconCodePoint'] as int, fontFamily: 'MaterialIcons')
-        : Icons.smartphone_rounded,
-    deliveryOption: json['deliveryOption'] as String? ?? 'Express Doorstep Delivery (1-2 Days)',
-    deliveryAddress: json['deliveryAddress'] as String? ?? 'Doorstep Delivery',
-    paymentMethod: json['paymentMethod'] as String? ?? 'Cash on Delivery (COD)',
-    paymentStatus: json['paymentStatus'] as String? ?? 'Pay after Doorstep Inspection',
-    orderStatus: (json['orderStatus'] ?? json['status'] ?? 'Order Confirmed • Dispatching in 24h') as String,
-    storeId: json['storeId'] as String? ?? 'EF-STORE-LKO-01',
-    storeName: json['storeName'] as String? ?? 'EcoFone Store',
-    storeAddress: json['storeAddress'] as String? ?? '',
-    storePhone: json['storePhone'] as String? ?? '',
-    storeMapsUrl: json['storeMapsUrl'] as String? ?? '',
-    customerName: json['customerName'] as String? ?? 'Valued Customer',
-    customerPhone: json['customerPhone'] as String? ?? '',
-    customerEmail: json['customerEmail'] as String?,
-    customerCity: json['customerCity'] as String?,
-    customerState: json['customerState'] as String?,
-    customerPincode: json['customerPincode'] as String?,
+    icon: _resolveOrderIcon(json['iconCodePoint'], (json['brand'] ?? json['manufacturer']) as String?),
+    deliveryOption: (json['deliveryOption'] ?? json['delivery_option'] ?? 'Express Doorstep Delivery (1-2 Days)') as String,
+    deliveryAddress: (json['deliveryAddress'] ?? json['delivery_address'] ?? 'Doorstep Delivery') as String,
+    paymentMethod: (json['paymentMethod'] ?? json['payment_method'] ?? 'Cash on Delivery (COD)') as String,
+    paymentStatus: (json['paymentStatus'] ?? json['payment_status'] ?? 'Pay after Doorstep Inspection') as String,
+    orderStatus: (json['orderStatus'] ?? json['order_status'] ?? json['status'] ?? 'Order Confirmed • Dispatching in 24h') as String,
+    storeId: (json['storeId'] ?? json['store_id'] ?? 'EF-STORE-LKO-01') as String,
+    storeName: (json['storeName'] ?? json['store_name'] ?? 'EcoFone Store') as String,
+    storeAddress: (json['storeAddress'] ?? json['store_address'] ?? '') as String,
+    storePhone: (json['storePhone'] ?? json['store_phone'] ?? '') as String,
+    storeMapsUrl: (json['storeMapsUrl'] ?? json['store_maps_url'] ?? '') as String,
+    customerName: (json['customerName'] ?? json['customer_name'] ?? 'Valued Customer') as String,
+    customerPhone: (json['customerPhone'] ?? json['customer_phone'] ?? '') as String,
+    customerEmail: (json['customerEmail'] ?? json['customer_email']) as String?,
+    customerCity: (json['customerCity'] ?? json['customer_city']) as String?,
+    customerState: (json['customerState'] ?? json['customer_state']) as String?,
+    customerPincode: (json['customerPincode'] ?? json['customer_pincode']) as String?,
     createdAt: json['createdAt'] != null
         ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now()
-        : DateTime.now(),
+        : (json['created_at'] != null
+            ? DateTime.tryParse(json['created_at'] as String) ?? DateTime.now()
+            : DateTime.now()),
     isSynced: json['isSynced'] as bool? ?? true,
-    invoiceNumber: json['invoiceNumber'] as String?,
-    saleNumber: json['saleNumber'] as String?,
-    saleId: (json['saleId'] as num?)?.toInt(),
-    imei1: json['imei1'] as String?,
-    invoiceUrl: json['invoiceUrl'] as String?,
-    razorpayPaymentId: json['razorpayPaymentId'] as String?,
-    razorpayOrderId: json['razorpayOrderId'] as String?,
+    invoiceNumber: (json['invoiceNumber'] ?? json['invoice_number']) as String?,
+    saleNumber: (json['saleNumber'] ?? json['sale_number']) as String?,
+    saleId: ((json['saleId'] ?? json['sale_id']) as num?)?.toInt(),
+    imei1: (json['imei1'] ?? json['imei']) as String?,
+    invoiceUrl: (json['invoiceUrl'] ?? json['invoice_url']) as String?,
+    razorpayPaymentId: (json['razorpayPaymentId'] ?? json['razorpay_payment_id']) as String?,
+    razorpayOrderId: (json['razorpayOrderId'] ?? json['razorpay_order_id']) as String?,
+    suggestedStoreId: (json['suggestedStoreId'] ?? json['suggested_store_id']) as String?,
+    suggestedDistanceKm: ((json['suggestedDistanceKm'] ?? json['suggested_distance_km']) as num?)?.toDouble(),
+    approvalNotes: (json['approvalNotes'] ?? json['approval_notes']) as String?,
+    approvedBy: (json['approvedBy'] ?? json['approved_by']) as String?,
   );
 
   PhoneOrder copyWith({
@@ -230,6 +297,10 @@ class PhoneOrder {
     String? invoiceUrl,
     String? razorpayPaymentId,
     String? razorpayOrderId,
+    String? suggestedStoreId,
+    double? suggestedDistanceKm,
+    String? approvalNotes,
+    String? approvedBy,
   }) => PhoneOrder(
     orderId: orderId ?? this.orderId,
     phoneId: phoneId ?? this.phoneId,
@@ -265,6 +336,10 @@ class PhoneOrder {
     invoiceUrl: invoiceUrl ?? this.invoiceUrl,
     razorpayPaymentId: razorpayPaymentId ?? this.razorpayPaymentId,
     razorpayOrderId: razorpayOrderId ?? this.razorpayOrderId,
+    suggestedStoreId: suggestedStoreId ?? this.suggestedStoreId,
+    suggestedDistanceKm: suggestedDistanceKm ?? this.suggestedDistanceKm,
+    approvalNotes: approvalNotes ?? this.approvalNotes,
+    approvedBy: approvedBy ?? this.approvedBy,
   );
 }
 

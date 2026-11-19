@@ -35,7 +35,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/logo/logo.png
     - assets/logo/logo_transparent.png
     - assets/logo/ecofone_horizontal_logo.png
     - assets/logo/brand_banner.jpg

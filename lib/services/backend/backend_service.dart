@@ -3,8 +3,11 @@ import 'package:ecofone/models/user_profile.dart';
 import 'package:ecofone/models/order_model.dart';
 import 'package:ecofone/models/inventory_model.dart';
 import 'package:ecofone/models/trade_in_model.dart';
+import 'package:ecofone/models/banner_model.dart';
 
 abstract class BackendService {
+  /// Fetch live promotional hero banners for home screen
+  Future<List<AppBanner>> fetchAppBanners();
   /// Stream live inventory updates for a particular store (or all stores)
   Stream<List<PhoneStockItem>> streamLiveInventory({String? storeId});
 
@@ -51,6 +54,9 @@ abstract class BackendService {
   Stream<List<PhoneOrder>> streamUserReservations(String userPhone);
   Future<PhoneOrder> createReservation(PhoneOrder reservation);
   Future<bool> cancelReservation(String reservationId);
+
+  /// Stops any ongoing background polling timer or Firestore listener for orders
+  void stopOrdersStream();
 
   /// Dispose any active stream listeners or websocket connections
   void dispose();

@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:ecofone/core/theme/anim_utils.dart';
 import 'package:ecofone/core/theme/app_theme.dart';
 import 'package:ecofone/core/widgets/flip_phone_stock_card.dart';
 import 'package:ecofone/screens/location_sheet.dart';
+import 'package:ecofone/services/network/connectivity_service.dart';
 import 'package:ecofone/state/app_state.dart';
 
 class StockScreen extends StatefulWidget {
@@ -20,28 +22,6 @@ class StockScreen extends StatefulWidget {
 
   @override
   State<StockScreen> createState() => _StockScreenState();
-}
-
-class _OfferBanner {
-  final String badge;
-  final String title;
-  final String subtitle;
-  final String cta;
-  final IconData icon;
-  final List<Color> gradient;
-  final Color badgeBg;
-  final Color badgeText;
-
-  const _OfferBanner({
-    required this.badge,
-    required this.title,
-    required this.subtitle,
-    required this.cta,
-    required this.icon,
-    required this.gradient,
-    required this.badgeBg,
-    required this.badgeText,
-  });
 }
 
 class _StockScreenState extends State<StockScreen> with SingleTickerProviderStateMixin {
@@ -91,48 +71,23 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
 
 
 
-  static const List<_OfferBanner> _offerBanners = [
-    _OfferBanner(
-      badge: 'MEGA SALE',
-      title: 'Upgrade to iPhone 14 Pro',
-      subtitle: 'Flat ₹5,000 extra exchange bonus on your old smartphone',
-      cta: 'Claim Offer',
-      icon: Icons.local_fire_department_rounded,
-      gradient: [Color(0xFF13583C), Color(0xFF0D3B28)],
-      badgeBg: Color(0xFFEA580C),
-      badgeText: Colors.white,
-    ),
-    _OfferBanner(
-      badge: 'EXPRESS DELIVERY',
-      title: 'Free Doorstep Delivery & 2-Hr Pickup',
-      subtitle: 'Fast dispatch, verified 32-point diagnostics & 7-day return guarantee!',
-      cta: 'Shop Now',
-      icon: Icons.local_shipping_rounded,
-      gradient: [Color(0xFFEA580C), Color(0xFFC2410C)],
-      badgeBg: Colors.white,
-      badgeText: Color(0xFFC2410C),
-    ),
-    _OfferBanner(
-      badge: 'BANK OFFER',
-      title: 'Flat ₹2,500 Instant Cashback',
-      subtitle: 'On orders above ₹30,000 via HDFC, ICICI, SBI & UPI',
-      cta: 'View Cards',
-      icon: Icons.credit_card_rounded,
-      gradient: [Color(0xFF78350F), Color(0xFF451A03)],
-      badgeBg: Color(0xFFFEF3C7),
-      badgeText: Color(0xFF92400E),
-    ),
-    _OfferBanner(
-      badge: '6-MONTH WARRANTY',
-      title: 'Pan-India Certified Guarantee',
-      subtitle: '100% genuine components with free doorstep pickup & repair',
-      cta: 'Learn More',
-      icon: Icons.shield_rounded,
-      gradient: [Color(0xFF065F46), Color(0xFF064E3B)],
-      badgeBg: Color(0xFFD1FAE5),
-      badgeText: Color(0xFF065F46),
-    ),
-  ];
+  List<AppBanner> get _offerBanners => AppState.instance.appBanners;
+
+  void _handleBannerTap(AppBanner banner) {
+    if (banner.actionValue.startsWith('http://') || banner.actionValue.startsWith('https://')) {
+      launchUrl(Uri.parse(banner.actionValue), mode: LaunchMode.externalApplication);
+    } else if (banner.actionValue == '/trade_in') {
+      Navigator.of(context).pushNamed('/trade_in');
+    } else if (banner.actionValue == '/stock') {
+      setState(() {
+        _selectedBrand = 'All';
+        _selectedGrade = 'All';
+        _selectedStorage = 'All';
+        _selectedBudget = 'All';
+        _searchController.clear();
+      });
+    }
+  }
 
   late final PageController _bannerPageController;
   int _currentBannerIndex = 0;
@@ -142,6 +97,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     _bannerTimer?.cancel();
     _bannerTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
       if (!_bannerPageController.hasClients) return;
+      if (_offerBanners.isEmpty) return;
       final nextIndex = (_currentBannerIndex + 1) % _offerBanners.length;
       _bannerPageController.animateToPage(
         nextIndex,
@@ -157,13 +113,19 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     _bannerPageController = PageController(viewportFraction: 0.92);
     _startBannerTimer();
     AppState.instance.addListener(_onAppStateChanged);
-    if (AppState.instance.wishlistedIds.isEmpty) {
-      AppState.instance.wishlistedIds.addAll({'EF-101', 'EF-103', 'EF-105'});
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(AppState.instance.refreshBanners());
+      }
+    });
   }
 
   void _onAppStateChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
@@ -189,8 +151,21 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
           strokeWidth: 2.4,
           onRefresh: () async {
             HapticFeedback.lightImpact();
+            final isOnline = await ConnectivityService.instance.checkNow();
+            if (!context.mounted) return;
+            if (!isOnline) {
+              ConnectivityService.showNetworkErrorSnackBar(
+                context,
+                customMessage: 'No Internet Connection • Please connect to the internet to refresh live stock',
+                onRetry: () => ConnectivityService.instance.checkNow(),
+              );
+              return;
+            }
             setState(() => _isLoading = true);
-            await AppState.instance.refreshInventory();
+            await Future.wait([
+              AppState.instance.refreshInventory(),
+              AppState.instance.refreshBanners(),
+            ]);
             if (mounted) setState(() => _isLoading = false);
           },
           child: CustomScrollView(
@@ -203,7 +178,8 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
               _buildOffersCarousel(),
               _buildSellOldPhoneBanner(),
               _buildBrandSelector(),
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              _buildRealtimeInventoryHeader(items.length),
+              const SliverToBoxAdapter(child: SizedBox(height: 10)),
               _buildStockList(items),
               const SliverToBoxAdapter(child: SizedBox(height: 110)),
             ],
@@ -268,12 +244,16 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                       children: [
                         Row(
                           children: [
-                            const Text(
-                              'Sell Your Old Phone',
-                              style: TextStyle(
-                                color: _forestGreen,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
+                            const Flexible(
+                              child: Text(
+                                'Sell Your Old Phone',
+                                style: TextStyle(
+                                  color: _forestGreen,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -302,6 +282,8 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                           color: _forestGreen.withOpacity(0.65),
                           fontSize: 11,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -330,6 +312,11 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
 
   // --- Offers Banner Carousel (3-4 High-Converting Banners) ---
   Widget _buildOffersCarousel() {
+    final banners = _offerBanners;
+    if (banners.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
     return SliverToBoxAdapter(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -338,115 +325,159 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
             height: 126,
             child: PageView.builder(
               controller: _bannerPageController,
-              itemCount: _offerBanners.length,
+              itemCount: banners.length,
               onPageChanged: (index) => setState(() => _currentBannerIndex = index),
               itemBuilder: (context, index) {
-                final banner = _offerBanners[index];
+                final banner = banners[index];
+                final hasImage = banner.imageUrl != null && banner.imageUrl!.isNotEmpty;
+
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: banner.gradient,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: banner.gradient.first.withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
+                  child: BouncingWidget(
+                    scaleFactor: 0.98,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      _handleBannerTap(banner);
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: banner.gradient,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                      ],
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          right: -10,
-                          bottom: -10,
-                          child: Icon(
-                            banner.icon,
-                            size: 105,
-                            color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: banner.gradient.first.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                                decoration: BoxDecoration(
-                                  color: banner.badgeBg,
-                                  borderRadius: BorderRadius.circular(6),
+                        ],
+                      ),
+                      child: Stack(
+                        children: [
+                          // 1. If banner has an uploaded photo, render it
+                          if (hasImage)
+                            Positioned.fill(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: Image.network(
+                                  banner.imageUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
                                 ),
-                                child: Text(
-                                  banner.badge,
-                                  style: TextStyle(
-                                    color: banner.badgeText,
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.5,
+                              ),
+                            ),
+
+                          // 2. Dark tint overlay if image exists so typography remains 100% legible
+                          if (hasImage)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.black.withOpacity(0.78),
+                                      Colors.black.withOpacity(0.28),
+                                    ],
+                                    begin: Alignment.bottomLeft,
+                                    end: Alignment.topRight,
                                   ),
                                 ),
                               ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    banner.title,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: -0.2,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                            ),
+
+                          // 3. Faded icon in background if no photo
+                          if (!hasImage)
+                            Positioned(
+                              right: -10,
+                              bottom: -10,
+                              child: Icon(
+                                banner.icon,
+                                size: 105,
+                                color: Colors.white.withOpacity(0.08),
+                              ),
+                            ),
+
+                          // 4. Foreground Typography & Badge Content
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: banner.badgeBg,
+                                    borderRadius: BorderRadius.circular(6),
                                   ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    banner.subtitle,
+                                  child: Text(
+                                    banner.badge,
                                     style: TextStyle(
-                                      color: Colors.white.withOpacity(0.85),
-                                      fontSize: 11,
-                                      height: 1.2,
+                                      color: banner.badgeText,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ],
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.18),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.white.withOpacity(0.3)),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      banner.cta,
+                                      banner.title,
                                       style: const TextStyle(
                                         color: Colors.white,
-                                        fontSize: 10.5,
+                                        fontSize: 15,
                                         fontWeight: FontWeight.bold,
+                                        letterSpacing: -0.2,
                                       ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                    const SizedBox(width: 4),
-                                    const Icon(Icons.arrow_forward_rounded, size: 10, color: Colors.white),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      banner.subtitle,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.85),
+                                        fontSize: 11,
+                                        height: 1.2,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ],
                                 ),
-                              ),
-                            ],
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.18),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        banner.cta,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.arrow_forward_rounded, size: 10, color: Colors.white),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -457,7 +488,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
           // Animated dot indicators
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(_offerBanners.length, (i) {
+            children: List.generate(banners.length, (i) {
               final isSelected = i == _currentBannerIndex;
               return AnimatedContainer(
                 duration: const Duration(milliseconds: 240),
@@ -480,7 +511,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
   // --- 1. Authentic Luxury EcoFone Brand Top Bar (Matches Official Logo & Theme) ---
   Widget _buildTopBar() {
     final initials = _getUserInitials();
-    final cartCount = AppState.instance.reservations.length;
+    final cartCount = AppState.instance.wishlistedIds.length + AppState.instance.orders.length;
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -490,14 +521,16 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // Official EcoFone Brand Horizontal Logo (Uploaded by User)
-            Image.asset(
-              'assets/logo/ecofone_horizontal_logo.png',
-              height: 40,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => Image.asset(
-                'assets/logo/logo_transparent.png',
+            Flexible(
+              child: Image.asset(
+                'assets/logo/ecofone_horizontal_logo.png',
                 height: 40,
                 fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Image.asset(
+                  'assets/logo/logo_transparent.png',
+                  height: 40,
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
 
@@ -546,7 +579,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                 ),
                 const SizedBox(width: 8),
 
-                // User Avatar Circle with Initials
+                // User Avatar Circle with Initials or Guest Person Icon
                 BouncingWidget(
                   scaleFactor: 0.92,
                   onTap: () {
@@ -562,15 +595,21 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
-                    child: Text(
-                      initials,
-                      style: GoogleFonts.plusJakartaSans(
-                        color: EcoColors.forestGreen,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
+                    child: (AppState.instance.isLoggedIn && initials.isNotEmpty)
+                        ? Text(
+                            initials,
+                            style: GoogleFonts.plusJakartaSans(
+                              color: EcoColors.forestGreen,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.person_outline_rounded,
+                            size: 20,
+                            color: EcoColors.forestGreen,
+                          ),
                   ),
                 ),
               ],
@@ -584,11 +623,15 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
   // --- 2. Location Sub-line, Greeting & Display Headline ---
   Widget _buildGreetingAndHeadline() {
     final greeting = _getTimeGreeting();
+    final isLoggedIn = AppState.instance.isLoggedIn;
     final userName = _getUserFirstName();
     final loc = AppState.instance.userLocation;
-    final locationText = loc.area.isNotEmpty
-        ? 'Delivering to ${loc.area}, ${loc.city}'
-        : 'Delivering to ${loc.city.isNotEmpty ? loc.city : 'Indiranagar, Bengaluru'}';
+    final hasUserLocation = loc.isUserSelected || loc.isGpsDetected || isLoggedIn;
+    final locationText = hasUserLocation
+        ? (loc.area.isNotEmpty
+            ? 'Delivering to ${loc.area}, ${loc.city}'
+            : 'Delivering to ${loc.city} - ${loc.pincode}')
+        : 'Select delivery location';
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -636,7 +679,9 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
 
             // Personalized Greeting
             Text(
-              '$greeting, $userName',
+              isLoggedIn && userName != 'Guest'
+                  ? '$greeting, $userName'
+                  : 'Welcome to EcoFone',
               style: GoogleFonts.plusJakartaSans(
                 color: const Color(0xFF64748B),
                 fontSize: 14.5,
@@ -806,9 +851,10 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
   }
 
   String _getUserInitials() {
+    if (!AppState.instance.isLoggedIn) return '';
     final name = AppState.instance.userName?.trim();
     if (name == null || name.isEmpty || name == 'Valued Customer') {
-      return 'AM';
+      return '';
     }
     final parts = name.split(RegExp(r'\s+'));
     if (parts.length >= 2) {
@@ -825,9 +871,10 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
   }
 
   String _getUserFirstName() {
+    if (!AppState.instance.isLoggedIn) return 'Guest';
     final name = AppState.instance.userName?.trim();
     if (name == null || name.isEmpty || name == 'Valued Customer') {
-      return 'Aarav';
+      return 'Guest';
     }
     return name.split(RegExp(r'\s+')).first;
   }
@@ -888,6 +935,151 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     );
   }
 
+  // --- Live Real-Time Inventory & Guest Shopping Status Header ---
+  Widget _buildRealtimeInventoryHeader(int itemCount) {
+    final isLoggedIn = AppState.instance.isLoggedIn;
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: EcoColors.mintBorder.withOpacity(0.8),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: EcoColors.forestGreen.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Pulsing Live Dot + Inventory Header
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withOpacity(0.35),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            isLoggedIn
+                                ? 'Real-Time Inventory ($itemCount Available)'
+                                : 'All Live Inventory ($itemCount in Stock)',
+                            style: GoogleFonts.plusJakartaSans(
+                              color: const Color(0xFF0F172A),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'LIVE POS',
+                            style: TextStyle(
+                              color: Color(0xFF059669),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      !isLoggedIn
+                          ? 'Guest Mode • Real-time catalog from all hubs ready for delivery'
+                          : 'All verified hubs • Lucknow, Pune & Express Doorstep Delivery',
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFF64748B),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Quick Refresh Live Inventory Button
+              BouncingWidget(
+                scaleFactor: 0.90,
+                onTap: () async {
+                  HapticFeedback.lightImpact();
+                  await AppState.instance.refreshInventory(silent: false);
+                  if (mounted) setState(() {});
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.sync_rounded,
+                    size: 16,
+                    color: EcoColors.forestGreen,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // --- Comprehensive Filter Modal (Senior/Executive Clean UX) ---
   void _showComprehensiveFilterSheet() {
     showModalBottomSheet(
@@ -921,12 +1113,16 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Filter Inventory',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: EcoColors.forestGreen,
+                    const Flexible(
+                      child: Text(
+                        'Filter Inventory',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: EcoColors.forestGreen,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     TextButton(
@@ -973,7 +1169,14 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Condition Grade', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: EcoColors.forestGreen)),
+                    const Flexible(
+                      child: Text(
+                        'Condition Grade',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: EcoColors.forestGreen),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     GestureDetector(
                       onTap: () {
                         Navigator.pop(sheetCtx);
@@ -1088,23 +1291,29 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'EcoFone Condition Guide',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: EcoColors.forestGreen,
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'EcoFone Condition Guide',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: EcoColors.forestGreen,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Transparent, Cashify-standard quality grading',
-                        style: TextStyle(fontSize: 12, color: EcoColors.textSecondary),
-                      ),
-                    ],
+                        SizedBox(height: 2),
+                        Text(
+                          'Transparent, Cashify-standard quality grading',
+                          style: TextStyle(fontSize: 12, color: EcoColors.textSecondary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(ctx),
@@ -1301,8 +1510,8 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 220,
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
           childAspectRatio: 0.57,

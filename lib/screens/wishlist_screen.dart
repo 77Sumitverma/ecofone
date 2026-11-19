@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ecofone/core/theme/anim_utils.dart';
@@ -9,6 +10,7 @@ import 'package:ecofone/screens/location_sheet.dart';
 import 'package:ecofone/screens/phone_detail_screen.dart';
 import 'package:ecofone/state/app_state.dart';
 import 'package:ecofone/core/widgets/pos_invoice_sheet.dart';
+import 'package:ecofone/services/network/connectivity_service.dart';
 
 
 class WishlistScreen extends StatefulWidget {
@@ -28,6 +30,7 @@ class _WishlistItem {
   final int originalPrice;
   final IconData icon;
   final String stockStatus;
+  final PhoneStockItem phone;
 
   const _WishlistItem({
     required this.id,
@@ -37,6 +40,7 @@ class _WishlistItem {
     required this.originalPrice,
     required this.icon,
     required this.stockStatus,
+    required this.phone,
   });
 }
 
@@ -60,70 +64,76 @@ class _WishlistScreenState extends State<WishlistScreen> {
   }
 
   void _onAppStateChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
-  static const List<_WishlistItem> _catalog = [
-    _WishlistItem(
-      id: 'EF-101',
-      name: 'iPhone 14 Pro (128 GB)',
-      condition: 'Superb (Pristine)',
-      price: 76999,
-      originalPrice: 129900,
-      icon: Icons.phone_iphone_rounded,
-      stockStatus: 'Only 2 units remaining',
-    ),
-    _WishlistItem(
-      id: 'EF-102',
-      name: 'Galaxy S23 Ultra (256 GB)',
-      condition: 'Superb (Pristine)',
-      price: 74999,
-      originalPrice: 124999,
-      icon: Icons.smartphone_rounded,
-      stockStatus: 'In Stock',
-    ),
-    _WishlistItem(
-      id: 'EF-103',
-      name: 'OnePlus 11 5G (128 GB)',
-      condition: 'Very Good Grade',
-      price: 36999,
-      originalPrice: 56999,
-      icon: Icons.smartphone_rounded,
-      stockStatus: 'In Stock',
-    ),
-    _WishlistItem(
-      id: 'EF-104',
-      name: 'Google Pixel 7 Pro (128 GB)',
-      condition: 'Superb Grade',
-      price: 38999,
-      originalPrice: 84999,
-      icon: Icons.smartphone_rounded,
-      stockStatus: 'Only 1 unit remaining',
-    ),
-    _WishlistItem(
-      id: 'EF-105',
-      name: 'iPhone 13 (128 GB)',
-      condition: 'Very Good Grade',
-      price: 41999,
-      originalPrice: 69900,
-      icon: Icons.phone_iphone_rounded,
-      stockStatus: 'In Stock',
-    ),
-    _WishlistItem(
-      id: 'EF-106',
-      name: 'OnePlus Nord CE 3 (128 GB)',
-      condition: 'Good Grade',
-      price: 11999,
-      originalPrice: 19999,
-      icon: Icons.smartphone_rounded,
-      stockStatus: '3 units remaining',
-    ),
-  ];
-
   List<_WishlistItem> get _items {
-    return _catalog
-        .where((item) => AppState.instance.wishlistedIds.contains(item.id))
-        .toList();
+    final allPhones = <PhoneStockItem>[
+      ...AppState.instance.liveInventory,
+      ...PhoneStockItem.sampleInventory,
+    ];
+
+    final matched = <_WishlistItem>[];
+    final seen = <String>{};
+
+    for (final id in AppState.instance.wishlistedIds) {
+      if (seen.contains(id)) continue;
+
+      // 1. Try to find by id or sku in live/sample inventory
+      PhoneStockItem? phone;
+      for (final p in allPhones) {
+        if (p.id == id || p.sku == id) {
+          phone = p;
+          break;
+        }
+      }
+
+      // 2. Fallback to sample inventory by name match
+      if (phone == null) {
+        for (final p in PhoneStockItem.sampleInventory) {
+          if (p.id == id || p.name.toLowerCase() == id.toLowerCase()) {
+            phone = p;
+            break;
+          }
+        }
+      }
+
+      // 3. Fallback generic PhoneStockItem if ID unknown
+      phone ??= PhoneStockItem(
+        id: id,
+        name: 'EcoFone Certified Device',
+        brand: 'Apple',
+        storage: '128 GB',
+        color: 'Default',
+        batteryHealth: 95,
+        conditionGrade: 'Superb',
+        gradeDescription: 'Certified Refurbished',
+        refurbishedPrice: 39999,
+        originalPrice: 69999,
+        stockQuantity: 1,
+        icon: Icons.smartphone_rounded,
+        highlights: const ['6-Month Warranty'],
+      );
+
+      seen.add(id);
+      matched.add(_WishlistItem(
+        id: id,
+        name: phone.name.contains('(') ? phone.name : '${phone.brand} ${phone.name} (${phone.storage})',
+        condition: phone.conditionGrade,
+        price: phone.refurbishedPrice,
+        originalPrice: phone.originalPrice,
+        icon: phone.icon,
+        stockStatus: phone.stockQuantity > 0
+            ? (phone.stockQuantity <= 2 ? 'Only ${phone.stockQuantity} remaining' : 'In Stock')
+            : 'Available on Order',
+        phone: phone,
+      ));
+    }
+    return matched;
   }
 
   String _formatPrice(int price) {
@@ -322,10 +332,10 @@ class _WishlistScreenState extends State<WishlistScreen> {
   }
 
   Widget _buildItemCard(_WishlistItem item, int index) {
-    final phone = PhoneStockItem.sampleInventory.firstWhere(
-      (p) => p.id == item.id || item.name.toLowerCase().contains(p.name.toLowerCase()),
-      orElse: () => PhoneStockItem.sampleInventory.first,
-    );
+    final phone = item.phone;
+    final allInventory = AppState.instance.liveInventory.isNotEmpty
+        ? AppState.instance.liveInventory
+        : PhoneStockItem.sampleInventory;
 
     return BouncingWidget(
       scaleFactor: 0.97,
@@ -333,14 +343,14 @@ class _WishlistScreenState extends State<WishlistScreen> {
         PhoneDetailSheet.show(
           context,
           phone,
-          allPhones: PhoneStockItem.sampleInventory,
+          allPhones: allInventory,
         );
       },
       onLongPress: () {
         Phone3DPopShowcase.show(
           context,
           phone,
-          allPhones: PhoneStockItem.sampleInventory,
+          allPhones: allInventory,
           isWishlisted: true,
         );
       },
@@ -439,28 +449,34 @@ class _WishlistScreenState extends State<WishlistScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          _formatPrice(item.price),
-                          style: const TextStyle(
-                            color: _copper,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              _formatPrice(item.price),
+                              style: const TextStyle(
+                                color: _copper,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _formatPrice(item.originalPrice),
+                              style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 11,
+                                decoration: TextDecoration.lineThrough,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _formatPrice(item.originalPrice),
-                          style: TextStyle(
-                            color: Colors.grey.shade400,
-                            fontSize: 11,
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                     LuxuryShimmerSweep(
                       child: ElevatedButton(
@@ -502,6 +518,35 @@ class _WishlistScreenState extends State<WishlistScreen> {
   }
 
   void _showPhoneCheckoutModal(_WishlistItem item) {
+    int currentStep = AppState.instance.isLoggedIn ? 2 : 1;
+    bool otpSent = false;
+    bool isSendingOtp = false;
+    bool isVerifyingOtp = false;
+    String? phoneLoginError;
+    String? activeDynamicOtp;
+    int resendCountdown = 30;
+    Timer? resendTimer;
+
+    final phoneLoginCtrl = TextEditingController();
+    final otpLoginCtrl = TextEditingController();
+
+    void startResendTimer(void Function(void Function()) setModalState) {
+      resendTimer?.cancel();
+      resendCountdown = 30;
+      resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (resendCountdown <= 1) {
+          timer.cancel();
+          setModalState(() {
+            resendCountdown = 0;
+          });
+        } else {
+          setModalState(() {
+            resendCountdown--;
+          });
+        }
+      });
+    }
+
     final selectedStore = AppState.instance.selectedStore;
     final initialPhone = AppState.instance.userPhone ?? '';
     final cleanPhone = initialPhone.replaceAll(RegExp(r'[^0-9]'), '');
@@ -510,10 +555,14 @@ class _WishlistScreenState extends State<WishlistScreen> {
         : cleanPhone;
     final nameController = TextEditingController(text: AppState.instance.userName ?? '');
     final phoneController = TextEditingController(text: tenDigit);
+    final loc = AppState.instance.userLocation;
+    final defaultAddress = [
+      if (loc.area.isNotEmpty) loc.area,
+      if (loc.city.isNotEmpty) loc.city,
+      'Uttar Pradesh',
+    ].join(', ');
     final addressController = TextEditingController(
-      text: AppState.instance.userLocation.city.isNotEmpty
-          ? '${AppState.instance.userLocation.city}, Uttar Pradesh'
-          : '',
+      text: loc.city.isNotEmpty ? defaultAddress : '',
     );
     final pincodeController = TextEditingController(text: AppState.instance.userLocation.pincode);
 
@@ -585,8 +634,309 @@ class _WishlistScreenState extends State<WishlistScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Fulfillment Selector
-                    const Text('Fulfillment Method', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _forestGreen)),
+                    // STEP 1: MOBILE LOGIN VIA OTP (When user is not logged in)
+                    if (currentStep == 1) ...[
+                      if (!otpSent) ...[
+                        TextField(
+                          controller: phoneLoginCtrl,
+                          keyboardType: TextInputType.phone,
+                          maxLength: 10,
+                          onChanged: (val) {
+                            if (phoneLoginError != null) {
+                              setModalState(() => phoneLoginError = null);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: '10-Digit Mobile Number *',
+                            hintText: '98765 43210',
+                            counterText: '',
+                            errorText: phoneLoginError,
+                            prefixText: '+91 ',
+                            prefixStyle: const TextStyle(fontWeight: FontWeight.bold, color: _forestGreen),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            prefixIcon: const Icon(Icons.phone_iphone_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: isSendingOtp
+                                ? null
+                                : () async {
+                                    final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+                                    final isValidIndianNumber = RegExp(r'^[6-9]\d{9}$').hasMatch(clean);
+
+                                    if (!isValidIndianNumber) {
+                                      setModalState(() {
+                                        phoneLoginError = 'Enter a valid 10-digit mobile (starts with 6, 7, 8, or 9)';
+                                      });
+                                      return;
+                                    }
+
+                                    setModalState(() {
+                                      isSendingOtp = true;
+                                      phoneLoginError = null;
+                                    });
+
+                                    await AppState.instance.sendOtp(clean);
+                                    if (!modalCtx.mounted) return;
+
+                                    final generated = AppState.instance.backend?.getActiveOtp(clean) ?? '123456';
+                                    setModalState(() {
+                                      isSendingOtp = false;
+                                      otpSent = true;
+                                      activeDynamicOtp = generated;
+                                    });
+                                    startResendTimer(setModalState);
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _forestGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: isSendingOtp
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text(
+                                    'Send Verification OTP',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                          ),
+                        ),
+                      ] else ...[
+                        if (activeDynamicOtp != null)
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 14),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0F3B28), Color(0xFF16543A)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.key_rounded, size: 18, color: EcoColors.brightAmber),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Dynamic In-App OTP',
+                                        style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                                      ),
+                                      Text(
+                                        activeDynamicOtp!,
+                                        style: const TextStyle(
+                                          color: EcoColors.brightAmber,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 18,
+                                          letterSpacing: 4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                BouncingWidget(
+                                  scaleFactor: 0.92,
+                                  onTap: () {
+                                    setModalState(() {
+                                      otpLoginCtrl.text = activeDynamicOtp!;
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: EcoColors.brightAmber,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.bolt_rounded, size: 14, color: _forestGreen),
+                                        SizedBox(width: 3),
+                                        Text(
+                                          'Auto-fill',
+                                          style: TextStyle(
+                                            color: _forestGreen,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        TextField(
+                          controller: otpLoginCtrl,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 8,
+                            color: _forestGreen,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: '6-digit SMS OTP',
+                            counterText: '',
+                            hintText: '• • • • • •',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () {
+                                resendTimer?.cancel();
+                                setModalState(() {
+                                  otpSent = false;
+                                  otpLoginCtrl.clear();
+                                });
+                              },
+                              icon: const Icon(Icons.arrow_back_rounded, size: 14),
+                              label: const Text('Change Number', style: TextStyle(fontSize: 12)),
+                            ),
+                            if (resendCountdown > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.timer_outlined, size: 14, color: Colors.grey),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Resend in ${resendCountdown}s',
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+                                  await AppState.instance.sendOtp(clean);
+                                  final newOtp = AppState.instance.backend?.getActiveOtp(clean) ?? '123456';
+                                  setModalState(() {
+                                    activeDynamicOtp = newOtp;
+                                  });
+                                  startResendTimer(setModalState);
+                                },
+                                icon: const Icon(Icons.refresh_rounded, size: 14, color: _copper),
+                                label: const Text('Resend Code', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _copper)),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: isVerifyingOtp
+                                ? null
+                                : () async {
+                                    final enteredOtp = otpLoginCtrl.text.trim();
+                                    if (enteredOtp.length < 4) {
+                                      ScaffoldMessenger.of(context).clearSnackBars();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Please enter the 6-digit SMS OTP')),
+                                      );
+                                      return;
+                                    }
+
+                                    setModalState(() => isVerifyingOtp = true);
+                                    final clean = phoneLoginCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+
+                                    final profile = await AppState.instance.verifyOtpAndLogin(
+                                      phone: clean,
+                                      otp: enteredOtp,
+                                    );
+
+                                    if (profile == null) {
+                                      setModalState(() => isVerifyingOtp = false);
+                                      if (!modalCtx.mounted) return;
+                                      ScaffoldMessenger.of(context).clearSnackBars();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          backgroundColor: Colors.redAccent,
+                                          content: Text('❌ Invalid OTP. Tap Auto-fill or enter correct code.'),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    resendTimer?.cancel();
+
+                                    // Successfully logged in! Populate Step 2 fields and advance!
+                                    phoneController.text = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
+                                    if (profile.name.isNotEmpty && profile.name != 'Valued Customer') {
+                                      nameController.text = profile.name;
+                                    }
+                                    final currentLoc = AppState.instance.userLocation;
+                                    if (currentLoc.area.isNotEmpty) {
+                                      addressController.text = [
+                                        currentLoc.area,
+                                        if (currentLoc.city.isNotEmpty) currentLoc.city,
+                                        'Uttar Pradesh'
+                                      ].join(', ');
+                                    }
+                                    if (currentLoc.pincode.isNotEmpty) {
+                                      pincodeController.text = currentLoc.pincode;
+                                    }
+
+                                    setModalState(() {
+                                      isVerifyingOtp = false;
+                                      currentStep = 2;
+                                    });
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _forestGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: isVerifyingOtp
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text(
+                                    'Verify & Proceed to Address',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ]
+                    // STEP 2: ADDRESS & ORDER CHECKOUT
+                    else ...[
+                      // Fulfillment Selector
+                      const Text('Fulfillment Method', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _forestGreen)),
                     const SizedBox(height: 6),
                     Row(
                       children: [
@@ -780,28 +1130,70 @@ class _WishlistScreenState extends State<WishlistScreen> {
                       child: SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: () {
+                          onPressed: () async {
                             HapticFeedback.mediumImpact();
-                            final rawDigits = phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-                            if (rawDigits.length < 10) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
-                              );
-                              return;
-                            }
-
-                            if (deliveryOption == 'Doorstep Delivery' && addressController.text.trim().isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please enter your delivery address')),
-                              );
-                              return;
-                            }
-
                             final cName = nameController.text.trim().isEmpty
-                                ? (AppState.instance.userName ?? 'Valued Customer')
+                                ? (AppState.instance.userName ?? '')
                                 : nameController.text.trim();
+                            if (cName.isEmpty || cName.length < 2) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter your full name for delivery and GST invoice'),
+                                  backgroundColor: _copper,
+                                ),
+                              );
+                              return;
+                            }
+
+                            final rawDigits = phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
                             final tenDigit = rawDigits.length >= 10 ? rawDigits.substring(rawDigits.length - 10) : rawDigits;
+                            if (tenDigit.length != 10 || !RegExp(r'^[6-9]\d{9}$').hasMatch(tenDigit)) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9)'),
+                                  backgroundColor: _copper,
+                                ),
+                              );
+                              return;
+                            }
+
+                            if (deliveryOption == 'Doorstep Delivery') {
+                              if (addressController.text.trim().length < 5) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please enter your full delivery address (House/Flat No., Street, Landmark)'),
+                                    backgroundColor: _copper,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              final pin = pincodeController.text.trim();
+                              if (pin.length != 6 || !RegExp(r'^[1-9]\d{5}$').hasMatch(pin)) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please enter a valid 6-digit delivery pincode'),
+                                    backgroundColor: _copper,
+                                  ),
+                                );
+                                return;
+                              }
+                            }
+
                             final cPhone = '+91 $tenDigit';
+
+                            if (!ConnectivityService.instance.isOnline) {
+                              ConnectivityService.showNetworkErrorSnackBar(
+                                context,
+                                customMessage: 'No Internet Connection • Please connect to the internet to place your order',
+                                onRetry: () => ConnectivityService.instance.checkNow(),
+                              );
+                              return;
+                            }
 
                             if (!AppState.instance.isLoggedIn) {
                               AppState.instance.login(
@@ -810,34 +1202,27 @@ class _WishlistScreenState extends State<WishlistScreen> {
                               );
                             }
 
-                            String brand = 'Apple';
-                            final lowerName = item.name.toLowerCase();
-                            if (lowerName.contains('galaxy') || lowerName.contains('samsung')) {
-                              brand = 'Samsung';
-                            } else if (lowerName.contains('oneplus')) {
-                              brand = 'OnePlus';
-                            } else if (lowerName.contains('pixel') || lowerName.contains('google')) {
-                              brand = 'Google';
-                            }
-
                             final fullAddress = deliveryOption == 'Doorstep Delivery'
                                 ? '${addressController.text.trim()} ${pincodeController.text.trim().isNotEmpty ? '- ${pincodeController.text.trim()}' : ''}'
                                 : '${selectedStore.name}, ${selectedStore.address}';
 
-                            final order = PhoneOrder(
+                            final initialOrder = PhoneOrder(
                               orderId: 'ECO-ORD-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}',
-                              phoneId: item.id,
-                              phoneName: item.name,
-                              brand: brand,
-                              storage: '128 GB',
-                              color: 'Space Black',
+                              phoneId: item.phone.id,
+                              phoneName: item.phone.name,
+                              brand: item.phone.brand,
+                              storage: item.phone.storage,
+                              color: item.phone.color,
                               price: item.price,
                               conditionGrade: item.condition,
                               icon: item.icon,
+                              imageUrl: item.phone.imageUrl,
                               deliveryOption: deliveryOption,
                               deliveryAddress: fullAddress,
                               paymentMethod: paymentMethod,
-                              paymentStatus: paymentMethod == 'Cash on Delivery' ? 'Pay on Delivery' : 'Paid Online',
+                              paymentStatus: paymentMethod == 'Cash on Delivery'
+                                  ? 'Pay after Doorstep Inspection (COD)'
+                                  : 'Paid Online • Verified',
                               orderStatus: 'CONFIRMED',
                               storeId: selectedStore.id,
                               storeName: selectedStore.name,
@@ -849,7 +1234,22 @@ class _WishlistScreenState extends State<WishlistScreen> {
                               createdAt: DateTime.now(),
                             );
 
-                            AppState.instance.placeOrder(order);
+                            final isOnline = paymentMethod != 'Cash on Delivery';
+                            final paymentId = isOnline
+                                ? 'pay_WISH_${DateTime.now().millisecondsSinceEpoch}'
+                                : 'pay_COD_${DateTime.now().millisecondsSinceEpoch}';
+                            final rzpOrderId = isOnline
+                                ? 'order_WISH_${DateTime.now().millisecondsSinceEpoch}'
+                                : 'order_COD_${DateTime.now().millisecondsSinceEpoch}';
+
+                            final order = await AppState.instance.placeOnlineOrder(
+                              order: initialOrder,
+                              razorpayPaymentId: paymentId,
+                              razorpayOrderId: rzpOrderId,
+                            );
+
+                            // Remove item from wishlist once ordered
+                            AppState.instance.toggleWishlist(item.id);
 
                             if (!context.mounted) return;
                             Navigator.pop(modalCtx);
@@ -921,21 +1321,24 @@ class _WishlistScreenState extends State<WishlistScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           child: Text(
-                            'Confirm Order • ${_formatPrice(item.price)}',
+                            'Place Order • ${_formatPrice(item.price)}',
                             style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ], // End of STEP 2
+                ],
               ),
-            );
-          },
-        );
-      },
-    );
-  }
+            ),
+          );
+        },
+      );
+    },
+  ).whenComplete(() {
+    resendTimer?.cancel();
+  });
+}
 
 
   Widget _buildEmptyState() {

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:ecofone/core/theme/anim_utils.dart';
 import 'package:ecofone/core/theme/app_theme.dart';
 import 'package:ecofone/core/widgets/brand_logo.dart';
+import 'package:ecofone/services/network/connectivity_service.dart';
 import 'package:ecofone/state/app_state.dart';
 
 class TradeInScreen extends StatefulWidget {
@@ -362,57 +363,70 @@ class _TradeInScreenState extends State<TradeInScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withOpacity(0.2)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: const BoxDecoration(
-                        color: EcoColors.mintGreen,
-                        shape: BoxShape.circle,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: EcoColors.mintGreen,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'Live Benchmark Valuation',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+                      const SizedBox(width: 6),
+                      const Flexible(
+                        child: Text(
+                          'Live Benchmark Valuation',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: EcoColors.brightAmber.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: EcoColors.brightAmber.withOpacity(0.4)),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.lock_clock_rounded, size: 12, color: EcoColors.brightAmber),
-                    SizedBox(width: 4),
-                    Text(
-                      '7-Day Price Lock',
-                      style: TextStyle(
-                        color: EcoColors.brightAmber,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
+              const SizedBox(width: 6),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: EcoColors.brightAmber.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: EcoColors.brightAmber.withOpacity(0.4)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.lock_clock_rounded, size: 12, color: EcoColors.brightAmber),
+                      SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          '7-Day Price Lock',
+                          style: TextStyle(
+                            color: EcoColors.brightAmber,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -483,12 +497,16 @@ class _TradeInScreenState extends State<TradeInScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                'Instant Cash Payout',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.65),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+              Flexible(
+                child: Text(
+                  'Instant Cash Payout',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.65),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1856,6 +1874,11 @@ class _TradeInScreenState extends State<TradeInScreen> {
   void _showTradeInBookingSheet(BuildContext context, int price) {
     final nameController = TextEditingController(text: AppState.instance.userName ?? '');
     final phoneController = TextEditingController(text: AppState.instance.userPhone ?? '');
+    final addressController = TextEditingController(
+      text: AppState.instance.userLocation.area.isNotEmpty
+          ? '${AppState.instance.userLocation.area}, ${AppState.instance.userLocation.city}'
+          : '',
+    );
     String method = 'In-Store Walk-in (15-Min Instant Payout)';
     final activeStore = AppState.instance.selectedStore;
 
@@ -2076,6 +2099,20 @@ class _TradeInScreenState extends State<TradeInScreen> {
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                     ),
+                    if (!isStoreMethod) ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: addressController,
+                        decoration: InputDecoration(
+                          labelText: 'Doorstep Pickup Address',
+                          hintText: 'e.g. Flat 301, Sector 4, Gomti Nagar',
+                          isDense: true,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          prefixIcon: const Icon(Icons.home_outlined, size: 18),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
 
                     // Compact Confirm CTA Button
@@ -2083,18 +2120,55 @@ class _TradeInScreenState extends State<TradeInScreen> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
-                          final rawPhone = phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-                          if (rawPhone.length < 10) {
+                          final custName = nameController.text.trim();
+                          if (custName.isEmpty || custName.length < 2) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
+                              const SnackBar(
+                                content: Text('Please enter your full name for UPI payout & valuation receipt'),
+                                backgroundColor: _copper,
+                              ),
                             );
                             return;
                           }
-                          final custName = nameController.text.trim().isEmpty ? 'Valued Customer' : nameController.text.trim();
+
+                          final rawPhone = phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+                          final tenDigit = rawPhone.length >= 10 ? rawPhone.substring(rawPhone.length - 10) : rawPhone;
+                          if (tenDigit.length != 10 || !RegExp(r'^[6-9]\d{9}$').hasMatch(tenDigit)) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9)'),
+                                backgroundColor: _copper,
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (!isStoreMethod && addressController.text.trim().length < 5) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter your complete doorstep pickup address'),
+                                backgroundColor: _copper,
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (!ConnectivityService.instance.isOnline) {
+                            ConnectivityService.showNetworkErrorSnackBar(
+                              context,
+                              customMessage: 'No Internet Connection • Please connect to the internet to lock in your trade-in quote',
+                              onRetry: () => ConnectivityService.instance.checkNow(),
+                            );
+                            return;
+                          }
+
                           if (!AppState.instance.isLoggedIn) {
                             AppState.instance.login(
                               name: custName,
-                              phone: '+91 $rawPhone',
+                              phone: '+91 $tenDigit',
                             );
                           }
 
