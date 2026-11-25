@@ -305,34 +305,38 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   // ---------------------------------------------------------------------------
   Widget _buildPhonePhotosGallery(PhoneOrder order) {
     final imagePath = order.effectiveImageUrl;
+    final displayImagePath = imagePath.startsWith('assets/')
+        ? imagePath.replaceAll('.jpg', '.png')
+        : imagePath;
+    final isAssetImage = displayImagePath.startsWith('assets/');
 
     final photoItems = [
       {
         'title': 'Studio Front & Back Finish',
-        'subtitle': 'Verified Hazel & Gold exterior with pristine OEM body',
+        'subtitle': 'Verified ${order.color} exterior with pristine OEM body',
         'badge': 'Verified Unit',
-        'image': imagePath,
+        'image': displayImagePath,
         'icon': Icons.phone_android_rounded,
       },
       {
-        'title': 'Precision Camera Visor',
-        'subtitle': '50MP + 48MP 5x Optical Telephoto dual-sensor array tested',
+        'title': 'Precision Camera Optics',
+        'subtitle': 'Front & rear optical lenses calibrated and dust-free',
         'badge': 'Optics 100% OK',
-        'image': imagePath,
+        'image': displayImagePath,
         'icon': Icons.camera_enhance_rounded,
       },
       {
-        'title': '120Hz LTPO OLED Display',
-        'subtitle': '6.7" Quad HD+ screen with zero burn-in and flawless digitizer',
+        'title': 'Certified OLED / Retina Display',
+        'subtitle': 'Original display panel with zero burn-in and flawless digitizer',
         'badge': 'Original OEM Panel',
-        'image': imagePath,
+        'image': displayImagePath,
         'icon': Icons.screenshot_monitor_rounded,
       },
       {
-        'title': '48-Point Diagnostic Passed',
-        'subtitle': 'Battery Health 95%, Motherboard, 5G & Sensors verified by certified technicians',
-        'badge': 'EcoTone Certified',
-        'image': imagePath,
+        'title': '32-Point Diagnostic Passed',
+        'subtitle': 'Hardware, Battery, Camera, Biometrics & 5G verified by certified technicians',
+        'badge': 'EcoFone Certified',
+        'image': displayImagePath,
         'icon': Icons.verified_user_rounded,
       },
     ];
@@ -413,15 +417,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       color: const Color(0xFFF8FAFC),
                       padding: const EdgeInsets.all(16),
                       child: Center(
-                        child: imagePath.isNotEmpty && imagePath.startsWith('assets/')
+                        child: displayImagePath.isNotEmpty
                             ? Hero(
                                 tag: 'order_photo_${order.orderId}_$index',
-                                child: Image.asset(
-                                  imagePath,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) =>
-                                      Icon(item['icon'] as IconData, size: 90, color: _forestGreen.withOpacity(0.4)),
-                                ),
+                                child: isAssetImage
+                                    ? Image.asset(
+                                        displayImagePath,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (_, __, ___) =>
+                                            Icon(item['icon'] as IconData, size: 90, color: _forestGreen.withOpacity(0.4)),
+                                      )
+                                    : Image.network(
+                                        displayImagePath,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (_, __, ___) =>
+                                            Icon(item['icon'] as IconData, size: 90, color: _forestGreen.withOpacity(0.4)),
+                                      ),
                               )
                             : Icon(item['icon'] as IconData, size: 90, color: _forestGreen.withOpacity(0.4)),
                       ),

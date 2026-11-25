@@ -1643,7 +1643,9 @@ class MiniPhoneThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isApple = brand.toLowerCase().contains('apple');
-    final cleanUrl = realImageUrl?.replaceAll('.jpg', '.png');
+    final cleanUrl = (realImageUrl != null && realImageUrl!.startsWith('assets/'))
+        ? realImageUrl!.replaceAll('.jpg', '.png')
+        : realImageUrl;
     final hasRealImage = cleanUrl != null && cleanUrl.isNotEmpty;
 
     if (hasRealImage) {

@@ -74,6 +74,37 @@ class BillingApiService {
         if (apiKey != null && apiKey!.isNotEmpty) 'Authorization': 'Bearer $apiKey',
       };
 
+  /// Rewrites localhost / emulator / relative paths returned by backend APIs to match the active host.
+  String _normalizeMediaUrl(String rawUrl, String activeHost) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) return trimmed;
+    final cleanHost = activeHost.endsWith('/')
+        ? activeHost.substring(0, activeHost.length - 1)
+        : activeHost;
+    if (trimmed.startsWith('/')) {
+      return '$cleanHost$trimmed';
+    }
+    if (trimmed.startsWith('assets/') || trimmed.startsWith('uploads/')) {
+      return '$cleanHost/$trimmed';
+    }
+    final parsed = Uri.tryParse(trimmed);
+    if (parsed != null) {
+      const localDevHosts = {
+        '127.0.0.1',
+        'localhost',
+        '10.0.2.2',
+        '192.168.1.16',
+        '192.168.1.17',
+      };
+      if (localDevHosts.contains(parsed.host)) {
+        final query = parsed.hasQuery ? '?${parsed.query}' : '';
+        final fragment = parsed.hasFragment ? '#${parsed.fragment}' : '';
+        return '$cleanHost${parsed.path}$query$fragment';
+      }
+    }
+    return trimmed;
+  }
+
   /// Fetches real-time available inventory from the billing software
   Future<List<PhoneStockItem>> fetchInventory({String? storeId}) async {
     if (isSandboxMode) {
@@ -109,9 +140,16 @@ class BillingApiService {
             itemsJson = [];
           }
 
-          final items = itemsJson
-              .map((item) => PhoneStockItem.fromJson(item as Map<String, dynamic>))
-              .toList();
+          final items = itemsJson.map((item) {
+            final map = Map<String, dynamic>.from(item as Map);
+            final rawImg = (map['imageUrl'] ?? map['image_url'] ?? map['image']) as String?;
+            if (rawImg != null && rawImg.isNotEmpty) {
+              final normalized = _normalizeMediaUrl(rawImg, host);
+              map['imageUrl'] = normalized;
+              map['image_url'] = normalized;
+            }
+            return PhoneStockItem.fromJson(map);
+          }).toList();
 
           if (items.isNotEmpty) {
             debugPrint('[BillingAPI] ✅ Connected to $host! Fetched ${items.length} live smartphone items.');
@@ -136,7 +174,7 @@ class BillingApiService {
 
     for (final host in candidateBaseUrls) {
       try {
-        final uri = Uri.parse('$host/api/v1/inventory/$skuOrId');
+        final uri = Uri.parse('$host/api/v1/inventory/${Uri.encodeComponent(skuOrId)}');
         final response = await _client
             .get(uri, headers: _headers)
             .timeout(const Duration(seconds: 2));
@@ -144,8 +182,17 @@ class BillingApiService {
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
           final decoded = jsonDecode(response.body);
-          final data = decoded is Map && decoded['data'] != null ? decoded['data'] : decoded;
-          return PhoneStockItem.fromJson(data as Map<String, dynamic>);
+          final rawData = decoded is Map && decoded['data'] != null ? decoded['data'] : decoded;
+          if (rawData is Map) {
+            final map = Map<String, dynamic>.from(rawData);
+            final rawImg = (map['imageUrl'] ?? map['image_url'] ?? map['image']) as String?;
+            if (rawImg != null && rawImg.isNotEmpty) {
+              final normalized = _normalizeMediaUrl(rawImg, host);
+              map['imageUrl'] = normalized;
+              map['image_url'] = normalized;
+            }
+            return PhoneStockItem.fromJson(map);
+          }
         }
       } catch (e) {
         // Continue to next candidate
@@ -510,18 +557,7 @@ class BillingApiService {
               .map((b) {
                 final map = Map<String, dynamic>.from(b as Map);
                 if (map['image_url'] != null && map['image_url'] is String) {
-                  final img = map['image_url'] as String;
-                  final hostUri = Uri.tryParse(host);
-                  final authority = hostUri?.authority ?? '192.168.1.17:8000';
-                  if (img.startsWith('/')) {
-                    map['image_url'] = '$host$img';
-                  } else if (img.contains('127.0.0.1:8000')) {
-                    map['image_url'] = img.replaceAll('127.0.0.1:8000', authority);
-                  } else if (img.contains('localhost:8000')) {
-                    map['image_url'] = img.replaceAll('localhost:8000', authority);
-                  } else if (img.contains('192.168.1.16:8000')) {
-                    map['image_url'] = img.replaceAll('192.168.1.16:8000', authority);
-                  }
+                  map['image_url'] = _normalizeMediaUrl(map['image_url'] as String, host);
                 }
                 return AppBanner.fromJson(map);
               })

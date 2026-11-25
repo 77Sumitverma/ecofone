@@ -263,5 +263,93 @@ void main() {
 
       backend.dispose();
     });
+
+    test('Media URL normalization preserves .jpg network uploads & resolves PhoneOrder fallback assets', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.host != 'api.ecofone.in') {
+          return http.Response('Unreachable', 503);
+        }
+        if (request.url.path == '/api/v1/inventory') {
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': [
+                {
+                  'id': 'SKU-JPG-01',
+                  'sku': 'SKU-JPG-01',
+                  'name': 'iPhone 15',
+                  'brand': 'Apple',
+                  'storage': '128 GB',
+                  'color': 'Blue',
+                  'batteryHealth': 98,
+                  'conditionGrade': 'Superb (Pristine)',
+                  'refurbishedPrice': 62999,
+                  'originalPrice': 79900,
+                  'stockQuantity': 2,
+                  'imageUrl': 'http://127.0.0.1:8000/uploads/catalog/iphone_15_photo.jpg',
+                }
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        } else if (request.url.path == '/api/v1/inventory/SKU-JPG-01') {
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': {
+                'id': 'SKU-JPG-01',
+                'sku': 'SKU-JPG-01',
+                'name': 'iPhone 15',
+                'brand': 'Apple',
+                'storage': '128 GB',
+                'color': 'Blue',
+                'batteryHealth': 98,
+                'conditionGrade': 'Superb (Pristine)',
+                'refurbishedPrice': 62999,
+                'originalPrice': 79900,
+                'stockQuantity': 2,
+                'imageUrl': '/uploads/catalog/iphone_15_photo.jpg',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = BillingApiService(
+        baseUrl: 'https://api.ecofone.in',
+        apiKey: 'eco_test_key_99182',
+        client: mockClient,
+      );
+
+      final list = await service.fetchInventory();
+      expect(list.first.imageUrl, 'https://api.ecofone.in/uploads/catalog/iphone_15_photo.jpg');
+
+      final single = await service.fetchProductDetails('SKU-JPG-01');
+      expect(single?.imageUrl, 'https://api.ecofone.in/uploads/catalog/iphone_15_photo.jpg');
+
+      final ip14Order = PhoneOrder(
+        orderId: 'ORD-14',
+        phoneId: 'SKU-14',
+        phoneName: 'iPhone 14',
+        brand: 'Apple',
+        storage: '128 GB',
+        color: 'Midnight',
+        price: 54999,
+        conditionGrade: 'Superb',
+        customerName: 'Test',
+        customerPhone: '+91 9999999999',
+        createdAt: DateTime.now(),
+      );
+      expect(ip14Order.effectiveImageUrl, 'assets/phones/iphone_14.png');
+
+      final op12rOrder = ip14Order.copyWith(phoneName: 'OnePlus 12R 5G', brand: 'OnePlus');
+      expect(op12rOrder.effectiveImageUrl, 'assets/phones/oneplus_12r.png');
+
+      service.dispose();
+    });
   });
 }
