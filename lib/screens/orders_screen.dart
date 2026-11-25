@@ -414,9 +414,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
                       final img = order.effectiveImageUrl;
                       if (img.isNotEmpty && img.startsWith('assets/')) {
                         return Image.asset(img, fit: BoxFit.contain);
-                      } else if (order.imageUrl != null && order.imageUrl!.isNotEmpty) {
+                      } else if (img.isNotEmpty) {
                         return Image.network(
-                          order.imageUrl!,
+                          img,
                           fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) =>
                               const Icon(Icons.phone_iphone_rounded, color: _forestGreen, size: 28),

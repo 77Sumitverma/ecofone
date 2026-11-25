@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ecofone/core/utils/phone_media_resolver.dart';
 import 'package:ecofone/state/app_state.dart';
 
 /// E-Commerce Smartphone Order Placed by Customer
@@ -97,51 +98,7 @@ class PhoneOrder {
 
   String get effectiveImageUrl {
     if (imageUrl != null && imageUrl!.isNotEmpty) return imageUrl!;
-    final nameLower = phoneName.toLowerCase();
-    final combined = '${brand.toLowerCase()} $nameLower';
-    if (combined.contains('adapter') || combined.contains('charger')) {
-      return 'assets/phones/apple_20w_adapter.png';
-    }
-    if (combined.contains('pixel 7 pro')) return 'assets/phones/pixel_7_pro.png';
-    if (combined.contains('pixel 6') || combined.contains('pixel')) {
-      return 'assets/phones/pixel_6a.png';
-    }
-    if (combined.contains('s23 ultra') ||
-        (combined.contains('galaxy') && combined.contains('s23'))) {
-      return 'assets/phones/galaxy_s23_ultra.png';
-    }
-    if (combined.contains('flip')) return 'assets/phones/galaxy_z_flip_4.png';
-    if (combined.contains('12r') || combined.contains('oneplus 12')) {
-      return 'assets/phones/oneplus_12r.png';
-    }
-    if (combined.contains('nord')) return 'assets/phones/oneplus_nord_ce_2_lite.png';
-    if (combined.contains('oneplus 11') || combined.contains('oneplus')) {
-      return 'assets/phones/oneplus_11.png';
-    }
-    if (combined.contains('redmi') || combined.contains('note 12')) {
-      return 'assets/phones/redmi_note_12_pro.png';
-    }
-    if (combined.contains('iphone 14 pro') ||
-        (combined.contains('apple') && combined.contains('14 pro'))) {
-      return 'assets/phones/iphone_14_pro.png';
-    }
-    if (combined.contains('iphone 14') ||
-        (combined.contains('apple') && combined.contains('14'))) {
-      return 'assets/phones/iphone_14.png';
-    }
-    if (combined.contains('iphone 13') ||
-        (combined.contains('apple') && combined.contains('13'))) {
-      return 'assets/phones/iphone_13.png';
-    }
-    if (combined.contains('iphone 12') ||
-        (combined.contains('apple') && combined.contains('12'))) {
-      return 'assets/phones/iphone_12.png';
-    }
-    if (combined.contains('iphone 11') ||
-        (combined.contains('apple') && combined.contains('11'))) {
-      return 'assets/phones/iphone_11.png';
-    }
-    return 'assets/phones/pixel_7_pro.png';
+    return PhoneMediaResolver.resolveColorAsset(brand, phoneName, color);
   }
 
   EcoStore get store {

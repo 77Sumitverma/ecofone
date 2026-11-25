@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:ecofone/core/theme/anim_utils.dart';
 import 'package:ecofone/core/theme/app_theme.dart';
+import 'package:ecofone/core/utils/phone_media_resolver.dart';
 import 'package:ecofone/core/widgets/phone_3d_pop_showcase.dart';
 import 'package:ecofone/core/widgets/smartphone_preview_widget.dart';
 import 'package:ecofone/screens/directions_sheet.dart';
@@ -158,6 +159,20 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
   late PhoneStockItem _currentPhone;
   late String _selectedStorage;
   late String _selectedColor;
+
+  String get _effectiveColorImageUrl => PhoneMediaResolver.resolveEffectiveImageUrl(
+        brand: _currentPhone.brand,
+        modelName: _currentPhone.name,
+        selectedColor: _selectedColor,
+        initialColor: _currentPhone.color,
+        rawImageUrl: _currentPhone.imageUrl,
+      );
+
+  List<String> get _availableColors => PhoneMediaResolver.colorsForPhone(
+        _currentPhone.brand,
+        _currentPhone.name,
+        primaryColor: _currentPhone.color,
+      );
 
   List<String> get _availableStorages {
     final name = _currentPhone.name.toLowerCase();
@@ -603,17 +618,21 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
           ),
           const SizedBox(height: 12),
 
-          // Central Clean Phone Graphic Preview
+          // Central Clean Phone Graphic Preview (dynamically switches photo by selected color)
           SizedBox(
             height: 190,
             child: Center(
-              child: MiniPhoneThumbnail(
-                brand: _currentPhone.brand,
-                colorName: _selectedColor,
-                batteryHealth: _currentPhone.batteryHealth,
-                realImageUrl: _currentPhone.imageUrl,
-                width: 140,
-                height: 185,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: MiniPhoneThumbnail(
+                  key: ValueKey('${_currentPhone.id}_$_selectedColor'),
+                  brand: _currentPhone.brand,
+                  colorName: _selectedColor,
+                  batteryHealth: _currentPhone.batteryHealth,
+                  realImageUrl: _effectiveColorImageUrl,
+                  width: 140,
+                  height: 185,
+                ),
               ),
             ),
           ),
@@ -833,10 +852,30 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
-            children: {_currentPhone.color, 'Space Black', 'Midnight Blue'}.map((color) {
+            runSpacing: 8,
+            children: _availableColors.map((color) {
               final isSelected = color == _selectedColor;
+              final swatch = PhoneMediaResolver.swatchColor(color);
               return ChoiceChip(
-                label: Text(color),
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 11,
+                      height: 11,
+                      decoration: BoxDecoration(
+                        color: swatch,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? Colors.white.withOpacity(0.85) : Colors.black.withOpacity(0.25),
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(color),
+                  ],
+                ),
                 selected: isSelected,
                 selectedColor: _copper,
                 backgroundColor: EcoColors.background,
@@ -1476,13 +1515,17 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: (_currentPhone.imageUrl != null && _currentPhone.imageUrl!.isNotEmpty)
+                              child: _effectiveColorImageUrl.startsWith('assets/')
                                   ? Image.asset(
-                                      _currentPhone.imageUrl!,
+                                      _effectiveColorImageUrl,
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, __, ___) => Icon(_currentPhone.icon, color: _forestGreen, size: 24),
                                     )
-                                  : Icon(_currentPhone.icon, color: _forestGreen, size: 24),
+                                  : Image.network(
+                                      _effectiveColorImageUrl,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Icon(_currentPhone.icon, color: _forestGreen, size: 24),
+                                    ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -2213,7 +2256,7 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                             color: _selectedColor,
                             price: _calculatedRefurbishedPrice,
                             conditionGrade: _currentPhone.conditionGrade,
-                            imageUrl: _currentPhone.imageUrl,
+                            imageUrl: _effectiveColorImageUrl,
                             icon: _currentPhone.icon,
                             deliveryOption: deliveryOption,
                             deliveryAddress: fullAddress,

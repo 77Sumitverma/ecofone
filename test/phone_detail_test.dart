@@ -5,6 +5,7 @@ import 'package:ecofone/core/widgets/phone_3d_pop_showcase.dart';
 import 'package:ecofone/core/widgets/phone_context_peek_pop.dart';
 import 'package:ecofone/core/widgets/phone_hero_feature_reveal.dart';
 import 'package:ecofone/core/widgets/phone_quick_peek_dialog.dart';
+import 'package:ecofone/core/widgets/smartphone_preview_widget.dart';
 import 'package:ecofone/screens/phone_detail_screen.dart';
 import 'package:ecofone/state/app_state.dart';
 
@@ -327,6 +328,37 @@ void main() {
 
     // Verify order placed / Tax invoice dialog
     expect(find.textContaining('Order Placed Successfully'), findsOneWidget);
+  });
+
+  testWidgets('Selecting a different color chip dynamically updates hero MiniPhoneThumbnail photo', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    final sampleItem = PhoneStockItem.sampleInventory.first; // iPhone 14 Pro Space Black
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PhoneDetailScreen(
+          phone: sampleItem,
+          allPhones: PhoneStockItem.sampleInventory,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify initial Space Black photo
+    var heroThumb = tester.widget<MiniPhoneThumbnail>(find.byType(MiniPhoneThumbnail).first);
+    expect(heroThumb.realImageUrl, 'assets/phones/iphone_14_pro.png');
+
+    // Scroll to Deep Purple color chip and tap it
+    await tester.ensureVisible(find.text('Deep Purple'));
+    await tester.tap(find.text('Deep Purple'));
+    await tester.pumpAndSettle();
+
+    heroThumb = tester.widget<MiniPhoneThumbnail>(find.byType(MiniPhoneThumbnail).first);
+    expect(heroThumb.colorName, 'Deep Purple');
+    expect(heroThumb.realImageUrl, 'assets/phones/iphone_14_pro_deep_purple.png');
   });
 }
 

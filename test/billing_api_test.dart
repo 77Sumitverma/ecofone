@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ecofone/core/utils/phone_media_resolver.dart';
 import 'package:ecofone/services/backend/realtime_backend_service.dart';
 import 'package:ecofone/services/storage/local_storage_service.dart';
 import 'package:ecofone/state/app_state.dart';
@@ -350,6 +351,50 @@ void main() {
       expect(op12rOrder.effectiveImageUrl, 'assets/phones/oneplus_12r.png');
 
       service.dispose();
+    });
+
+    test('PhoneMediaResolver resolves exact authentic photos for every brand, model & color', () {
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 14 Pro', 'Space Black'), 'assets/phones/iphone_14_pro.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 14 Pro', 'Deep Purple'), 'assets/phones/iphone_14_pro_deep_purple.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 14 Pro', 'Silver'), 'assets/phones/iphone_14_pro_silver.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 14 Pro', 'Gold'), 'assets/phones/iphone_14_pro_gold.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 14', 'Blue'), 'assets/phones/iphone_14_blue.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 13', 'Starlight White'), 'assets/phones/iphone_13_starlight.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 13', 'Midnight Blue'), 'assets/phones/iphone_13.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 12', 'Product Red'), 'assets/phones/iphone_12_red.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Apple', 'iPhone 11', 'White'), 'assets/phones/iphone_11_white.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Samsung', 'Galaxy S23 Ultra 5G', 'Phantom Black'), 'assets/phones/galaxy_s23_ultra.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Samsung', 'Galaxy S23 Ultra 5G', 'Lavender'), 'assets/phones/galaxy_s23_ultra_lavender.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Samsung', 'Galaxy Z Flip 4 5G', 'Graphite'), 'assets/phones/galaxy_z_flip_4_graphite.png');
+      expect(PhoneMediaResolver.resolveColorAsset('OnePlus', 'OnePlus 11 5G', 'Titan Black'), 'assets/phones/oneplus_11_titan_black.png');
+      expect(PhoneMediaResolver.resolveColorAsset('OnePlus', 'OnePlus 12R 5G', 'Iron Gray'), 'assets/phones/oneplus_12r_iron_gray.png');
+      expect(PhoneMediaResolver.resolveColorAsset('OnePlus', 'OnePlus Nord CE 2 Lite', 'Black Dusk'), 'assets/phones/oneplus_nord_ce_2_lite_black_dusk.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Google', 'Pixel 7 Pro', 'Obsidian'), 'assets/phones/pixel_7_pro_obsidian.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Google', 'Pixel 6a', 'Chalk White'), 'assets/phones/pixel_6a_chalk.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Google', 'Pixel 6a', 'Charcoal Black'), 'assets/phones/pixel_6a.png');
+      expect(PhoneMediaResolver.resolveColorAsset('Xiaomi', 'Redmi Note 12 Pro 5G', 'Glacier Blue'), 'assets/phones/redmi_note_12_pro_blue.png');
+
+      // Preserves custom URL for initialColor and dynamically swaps on color selection change
+      expect(
+        PhoneMediaResolver.resolveEffectiveImageUrl(
+          brand: 'Apple',
+          modelName: 'iPhone 14 Pro',
+          selectedColor: 'Space Black',
+          initialColor: 'Space Black',
+          rawImageUrl: 'https://api.ecofone.in/uploads/custom.jpg',
+        ),
+        'https://api.ecofone.in/uploads/custom.jpg',
+      );
+      expect(
+        PhoneMediaResolver.resolveEffectiveImageUrl(
+          brand: 'Apple',
+          modelName: 'iPhone 14 Pro',
+          selectedColor: 'Deep Purple',
+          initialColor: 'Space Black',
+          rawImageUrl: 'https://api.ecofone.in/uploads/custom.jpg',
+        ),
+        'assets/phones/iphone_14_pro_deep_purple.png',
+      );
     });
   });
 }
