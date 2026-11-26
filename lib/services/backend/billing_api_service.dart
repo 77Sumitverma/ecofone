@@ -34,23 +34,19 @@ class BillingApiService {
   })  : _client = client ?? http.Client(),
         isSandboxMode = (baseUrl == null || baseUrl.isEmpty || baseUrl == 'https://mock.billing.ecofone.internal');
 
-  /// Dynamic list of candidate base URLs to try in order (ensures Wi-Fi and USB both work seamlessly)
+  /// Dynamic list of candidate base URLs to try in order (ensures USB ADB reverse and Wi-Fi both work seamlessly)
   List<String> get candidateBaseUrls {
     final list = <String>[];
     if (_workingBaseUrl != null && _workingBaseUrl!.isNotEmpty) {
       list.add(_workingBaseUrl!);
     }
-    // Prioritize active PC Wi-Fi host for seamless direct physical phone connection on local Wi-Fi
-    const activeWifiHost = 'http://192.168.1.17:8000';
-    if (!list.contains(activeWifiHost)) {
-      list.add(activeWifiHost);
-    }
     if (baseUrl != null && baseUrl!.isNotEmpty && baseUrl != 'https://mock.billing.ecofone.internal') {
       if (!list.contains(baseUrl)) list.add(baseUrl!);
     }
     const defaults = [
-      'http://192.168.1.17:8000',
       'http://127.0.0.1:8000',
+      'http://172.20.10.2:8000',
+      'http://192.168.1.17:8000',
       'http://192.168.1.16:8000',
       'http://192.168.1.18:8000',
       'http://192.168.1.15:8000',
@@ -93,6 +89,7 @@ class BillingApiService {
         '127.0.0.1',
         'localhost',
         '10.0.2.2',
+        '172.20.10.2',
         '192.168.1.16',
         '192.168.1.17',
       };
@@ -123,7 +120,7 @@ class BillingApiService {
               'Accept': 'application/json',
               if (apiKey != null && apiKey!.isNotEmpty) 'x-api-key': apiKey!,
             })
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
@@ -177,7 +174,7 @@ class BillingApiService {
         final uri = Uri.parse('$host/api/v1/inventory/${Uri.encodeComponent(skuOrId)}');
         final response = await _client
             .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
@@ -227,7 +224,7 @@ class BillingApiService {
               },
               body: payload,
             )
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           _workingBaseUrl = host;
@@ -421,7 +418,7 @@ class BillingApiService {
         final uri = Uri.parse('$host/api/online/invoice/$invoiceNumber');
         final response = await _client
             .get(uri)
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
@@ -450,7 +447,7 @@ class BillingApiService {
               'Accept': 'application/json',
               if (apiKey != null && apiKey!.isNotEmpty) 'x-api-key': apiKey!,
             })
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
@@ -485,7 +482,7 @@ class BillingApiService {
         final uri = Uri.parse('$host/api/v1/orders/$orderId');
         final response = await _client
             .delete(uri, headers: _headers)
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200 || response.statusCode == 204) {
           _workingBaseUrl = host;
@@ -518,7 +515,7 @@ class BillingApiService {
               headers: _headers,
               body: jsonEncode(quote.toJson()),
             )
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           _workingBaseUrl = host;
@@ -643,6 +640,7 @@ class BillingApiService {
       'email': profile.email ?? '',
       'city': profile.city ?? '',
       'area': profile.area ?? '',
+      'address': profile.address ?? '',
       'pincode': profile.pincode ?? '',
     };
 
@@ -683,7 +681,7 @@ class BillingApiService {
         final uri = Uri.parse('$host/api/v1/health');
         final response = await _client
             .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200) {
           _workingBaseUrl = host;
@@ -694,7 +692,7 @@ class BillingApiService {
           final uri = Uri.parse('$host/api/online/inventory');
           final response = await _client
               .get(uri, headers: _headers)
-              .timeout(const Duration(seconds: 2));
+              .timeout(const Duration(seconds: 4));
           if (response.statusCode == 200) {
             _workingBaseUrl = host;
             return true;

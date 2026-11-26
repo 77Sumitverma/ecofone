@@ -890,15 +890,19 @@ class AppState extends ChangeNotifier {
       final profile = storage!.getUserProfile();
       if (profile != null) {
         isLoggedIn = true;
-        userName = profile.name;
+        userName = profile.hasSavedName ? profile.name.trim() : null;
         userPhone = profile.phone;
         userAlternatePhone = profile.alternatePhone;
         userEmail = profile.email;
+        final savedAddr = profile.effectiveSavedAddress;
+        userAddress = savedAddr.isNotEmpty ? savedAddr : null;
         if (profile.city != null && profile.city!.isNotEmpty) {
           userLocation = UserLocation(
             city: profile.city!,
             area: profile.area ?? '',
-            pincode: profile.pincode ?? userLocation.pincode,
+            pincode: (profile.pincode != null && profile.pincode!.isNotEmpty)
+                ? profile.pincode!
+                : userLocation.pincode,
             isUserSelected: true,
           );
         }
@@ -1183,6 +1187,134 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
   String? userPhone;
   String? userAlternatePhone;
   String? userEmail;
+  String? userAddress;
+
+  static String _normalizePhoneTenDigits(String raw) {
+    final clean = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    return clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
+  }
+
+  /// Returns previously registered Name & Delivery Address for suggestion during
+  /// checkout, or null for new users placing their first order.
+  SavedCheckoutDetails? getSavedCheckoutDetails() {
+    if (!isLoggedIn) return null;
+
+    final currentTen = _normalizePhoneTenDigits(userPhone ?? '');
+    String resolvedName = !UserProfile.isPlaceholderName(userName) ? userName!.trim() : '';
+    String resolvedAddress = !UserProfile.isPlaceholderAddress(userAddress) ? userAddress!.trim() : '';
+    String resolvedCity = '';
+    String resolvedPincode = '';
+
+    final storedProfile = storage?.getUserProfile();
+    if (storedProfile != null) {
+      if (resolvedName.isEmpty && storedProfile.hasSavedName) {
+        resolvedName = storedProfile.name.trim();
+      }
+      if (resolvedAddress.isEmpty && storedProfile.effectiveSavedAddress.isNotEmpty) {
+        resolvedAddress = storedProfile.effectiveSavedAddress;
+      }
+      if ((storedProfile.city ?? '').trim().isNotEmpty) {
+        resolvedCity = storedProfile.city!.trim();
+      }
+      if ((storedProfile.pincode ?? '').trim().isNotEmpty) {
+        resolvedPincode = storedProfile.pincode!.trim();
+      }
+    }
+
+    // Also inspect user's past orders as fallback for returning customers
+    for (final ord in orders) {
+      if (currentTen.isNotEmpty && _normalizePhoneTenDigits(ord.customerPhone) != currentTen) {
+        continue;
+      }
+      if (resolvedName.isEmpty && !UserProfile.isPlaceholderName(ord.customerName)) {
+        resolvedName = ord.customerName.trim();
+      }
+      if (resolvedAddress.isEmpty &&
+          !UserProfile.isPlaceholderAddress(ord.deliveryAddress) &&
+          !ord.deliveryOption.toLowerCase().contains('store pickup')) {
+        resolvedAddress = ord.deliveryAddress.trim();
+      }
+      if (resolvedCity.isEmpty && (ord.customerCity ?? '').trim().isNotEmpty) {
+        resolvedCity = ord.customerCity!.trim();
+      }
+      if (resolvedPincode.isEmpty && (ord.customerPincode ?? '').trim().isNotEmpty) {
+        resolvedPincode = ord.customerPincode!.trim();
+      }
+    }
+
+    if (resolvedName.isEmpty && resolvedAddress.isEmpty) {
+      return null;
+    }
+
+    return SavedCheckoutDetails(
+      name: resolvedName,
+      phone: currentTen,
+      address: resolvedAddress,
+      city: resolvedCity.isNotEmpty ? resolvedCity : userLocation.city,
+      pincode: resolvedPincode.isNotEmpty ? resolvedPincode : userLocation.pincode,
+    );
+  }
+
+  /// Saves customer details entered during first order (or updated at checkout)
+  /// so future orders show them as one-tap suggestions.
+  Future<void> saveCheckoutProfileDetails({
+    required String name,
+    String? phone,
+    required String address,
+    String? city,
+    String? pincode,
+  }) async {
+    final cleanName = name.trim();
+    final cleanAddress = address.trim();
+    final rawPhone = (phone != null && phone.trim().isNotEmpty) ? phone : (userPhone ?? '');
+    final tenDigits = _normalizePhoneTenDigits(rawPhone);
+    final formattedPhone = tenDigits.isNotEmpty ? '+91 $tenDigits' : (userPhone ?? '');
+
+    if (!isLoggedIn && tenDigits.isNotEmpty) {
+      isLoggedIn = true;
+      userPhone = formattedPhone;
+    }
+    if (!UserProfile.isPlaceholderName(cleanName)) {
+      userName = cleanName;
+    }
+    if (!UserProfile.isPlaceholderAddress(cleanAddress)) {
+      userAddress = cleanAddress;
+    }
+
+    final resolvedCity = (city != null && city.trim().isNotEmpty) ? city.trim() : userLocation.city;
+    final resolvedPincode = (pincode != null && pincode.trim().isNotEmpty) ? pincode.trim() : userLocation.pincode;
+
+    if (!UserProfile.isPlaceholderAddress(cleanAddress) || (pincode != null && pincode.trim().isNotEmpty)) {
+      userLocation = UserLocation(
+        city: resolvedCity,
+        area: !UserProfile.isPlaceholderAddress(cleanAddress) ? cleanAddress : userLocation.area,
+        pincode: resolvedPincode,
+        isUserSelected: true,
+      );
+    }
+
+    final updatedProfile = UserProfile(
+      name: userName ?? '',
+      phone: userPhone ?? formattedPhone,
+      alternatePhone: userAlternatePhone,
+      email: userEmail ?? (tenDigits.isNotEmpty ? '$tenDigits@ecofone.in' : null),
+      city: resolvedCity,
+      area: userLocation.area,
+      address: userAddress,
+      pincode: resolvedPincode,
+      token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
+      lastLoginAt: DateTime.now(),
+      isNewUser: false,
+    );
+
+    await storage?.saveUserProfile(updatedProfile);
+    if (backend != null) {
+      await backend!.updateUserProfile(updatedProfile);
+    } else {
+      unawaited(billingApi.syncUser(profile: updatedProfile));
+    }
+    notifyListeners();
+  }
 
   Future<bool> sendOtp(String phone) async {
     final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1215,28 +1347,31 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
       );
 
       if (profile != null) {
-        if (!profile.isNewUser) {
-          isLoggedIn = true;
-          userName = profile.name;
-          userPhone = profile.phone;
-          userAlternatePhone = profile.alternatePhone;
-          userEmail = profile.email;
-          if (profile.city != null && profile.city!.isNotEmpty) {
-            userLocation = UserLocation(
-              city: profile.city!,
-              area: profile.area ?? '',
-              pincode: profile.pincode ?? userLocation.pincode,
-              isUserSelected: true,
-            );
-          }
+        isLoggedIn = true;
+        userName = profile.hasSavedName ? profile.name.trim() : null;
+        userPhone = profile.phone;
+        userAlternatePhone = profile.alternatePhone;
+        userEmail = profile.email;
+        final savedAddr = profile.effectiveSavedAddress;
+        userAddress = savedAddr.isNotEmpty ? savedAddr : null;
 
-          // Sync and stream reservations
-          if (userPhone != null && userPhone!.isNotEmpty) {
-            _subscribeToReservations(userPhone!);
-          }
-
-          notifyListeners();
+        if (profile.city != null && profile.city!.isNotEmpty) {
+          userLocation = UserLocation(
+            city: profile.city!,
+            area: profile.area ?? '',
+            pincode: (profile.pincode != null && profile.pincode!.isNotEmpty)
+                ? profile.pincode!
+                : userLocation.pincode,
+            isUserSelected: true,
+          );
         }
+
+        // Sync and stream reservations
+        if (userPhone != null && userPhone!.isNotEmpty) {
+          _subscribeToReservations(userPhone!);
+        }
+
+        notifyListeners();
         return profile;
       }
       return null;
@@ -1245,14 +1380,43 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     final isMockValid = otp.trim() == '123456' || otp.trim() == '1234';
     if (!isMockValid) return null;
 
-    login(name: name ?? 'Customer', phone: formattedPhone);
-    return storage?.getUserProfile() ??
-        UserProfile(
-          phone: formattedPhone,
-          name: name ?? 'Customer',
-          lastLoginAt: DateTime.now(),
-          isNewUser: false,
-        );
+    if (name != null && !UserProfile.isPlaceholderName(name)) {
+      login(name: name.trim(), phone: formattedPhone);
+      return storage?.getUserProfile() ??
+          UserProfile(
+            phone: formattedPhone,
+            name: name.trim(),
+            lastLoginAt: DateTime.now(),
+            isNewUser: false,
+          );
+    }
+
+    isLoggedIn = true;
+    userPhone = formattedPhone;
+    userEmail = '$tenDigits@ecofone.in';
+    final existing = storage?.getUserProfile();
+    final samePhone = existing != null && _normalizePhoneTenDigits(existing.phone) == tenDigits;
+    userName = (samePhone && existing.hasSavedName) ? existing.name.trim() : null;
+    userAddress = (samePhone && existing.effectiveSavedAddress.isNotEmpty)
+        ? existing.effectiveSavedAddress
+        : null;
+
+    final phoneOnlyProfile = UserProfile(
+      name: userName ?? '',
+      phone: formattedPhone,
+      email: userEmail,
+      address: userAddress,
+      city: samePhone ? existing.city : null,
+      area: samePhone ? existing.area : null,
+      pincode: samePhone ? existing.pincode : null,
+      token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
+      lastLoginAt: DateTime.now(),
+      isNewUser: !samePhone,
+    );
+    await storage?.saveUserProfile(phoneOnlyProfile);
+    _subscribeToReservations(formattedPhone);
+    notifyListeners();
+    return phoneOnlyProfile;
   }
 
   /// Completes registration for a first-time sign-up customer
@@ -1365,15 +1529,22 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     String? email,
     String? city,
     String? area,
+    String? address,
     String? pincode,
   }) async {
-    userName = name.trim().isEmpty ? 'Valued Customer' : name.trim();
+    userName = UserProfile.isPlaceholderName(name) ? userName : name.trim();
     if (alternatePhone != null) {
       final cleanAlt = alternatePhone.replaceAll(RegExp(r'[^0-9]'), '');
       userAlternatePhone = cleanAlt.length >= 10 ? cleanAlt.substring(cleanAlt.length - 10) : (cleanAlt.isNotEmpty ? cleanAlt : null);
     }
     if (email != null && email.trim().isNotEmpty) {
       userEmail = email.trim();
+    }
+    final resolvedAddr = (address != null && !UserProfile.isPlaceholderAddress(address))
+        ? address.trim()
+        : ((area != null && !UserProfile.isPlaceholderAddress(area)) ? area.trim() : userAddress);
+    if (resolvedAddr != null && resolvedAddr.isNotEmpty) {
+      userAddress = resolvedAddr;
     }
     if (city != null && city.trim().isNotEmpty) {
       userLocation = UserLocation(
@@ -1385,12 +1556,13 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     }
 
     final updatedProfile = UserProfile(
-      name: userName!,
+      name: userName ?? '',
       phone: userPhone ?? '',
       alternatePhone: userAlternatePhone,
       email: userEmail,
       city: city?.trim() ?? userLocation.city,
       area: (area != null && area.trim().isNotEmpty) ? area.trim() : userLocation.area,
+      address: userAddress,
       pincode: pincode?.trim() ?? userLocation.pincode,
       token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
       lastLoginAt: DateTime.now(),
@@ -1412,6 +1584,7 @@ _Sent automatically via EcoFone E-Commerce Desk_''';
     userPhone = null;
     userAlternatePhone = null;
     userEmail = null;
+    userAddress = null;
     reservations.clear();
     _reservationsSubscription?.cancel();
     _reservationsSubscription = null;

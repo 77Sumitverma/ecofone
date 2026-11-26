@@ -10,6 +10,7 @@ import 'package:ecofone/screens/location_sheet.dart';
 import 'package:ecofone/screens/phone_detail_screen.dart';
 import 'package:ecofone/state/app_state.dart';
 import 'package:ecofone/core/widgets/pos_invoice_sheet.dart';
+import 'package:ecofone/core/widgets/saved_checkout_suggestion_card.dart';
 import 'package:ecofone/services/network/connectivity_service.dart';
 
 
@@ -553,18 +554,16 @@ class _WishlistScreenState extends State<WishlistScreen> {
     final tenDigit = cleanPhone.length >= 10
         ? cleanPhone.substring(cleanPhone.length - 10)
         : cleanPhone;
-    final nameController = TextEditingController(text: AppState.instance.userName ?? '');
+    var savedSuggestion = AppState.instance.getSavedCheckoutDetails();
+    bool savedSuggestionApplied = false;
+    final nameController = TextEditingController();
     final phoneController = TextEditingController(text: tenDigit);
-    final loc = AppState.instance.userLocation;
-    final defaultAddress = [
-      if (loc.area.isNotEmpty) loc.area,
-      if (loc.city.isNotEmpty) loc.city,
-      'Uttar Pradesh',
-    ].join(', ');
-    final addressController = TextEditingController(
-      text: loc.city.isNotEmpty ? defaultAddress : '',
+    final addressController = TextEditingController();
+    final pincodeController = TextEditingController(
+      text: (savedSuggestion != null && savedSuggestion.pincode.isNotEmpty)
+          ? savedSuggestion.pincode
+          : AppState.instance.userLocation.pincode,
     );
-    final pincodeController = TextEditingController(text: AppState.instance.userLocation.pincode);
 
     String deliveryOption = 'Doorstep Delivery';
     String paymentMethod = 'Cash on Delivery';
@@ -891,25 +890,19 @@ class _WishlistScreenState extends State<WishlistScreen> {
 
                                     resendTimer?.cancel();
 
-                                    // Successfully logged in! Populate Step 2 fields and advance!
+                                    // Successfully logged in! Load any saved profile suggestion & advance to Order Checkout!
                                     phoneController.text = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
-                                    if (profile.name.isNotEmpty && profile.name != 'Valued Customer') {
-                                      nameController.text = profile.name;
-                                    }
-                                    final currentLoc = AppState.instance.userLocation;
-                                    if (currentLoc.area.isNotEmpty) {
-                                      addressController.text = [
-                                        currentLoc.area,
-                                        if (currentLoc.city.isNotEmpty) currentLoc.city,
-                                        'Uttar Pradesh'
-                                      ].join(', ');
-                                    }
-                                    if (currentLoc.pincode.isNotEmpty) {
-                                      pincodeController.text = currentLoc.pincode;
+                                    final refreshedSuggestion = AppState.instance.getSavedCheckoutDetails();
+                                    nameController.clear();
+                                    addressController.clear();
+                                    if (refreshedSuggestion != null && refreshedSuggestion.pincode.isNotEmpty) {
+                                      pincodeController.text = refreshedSuggestion.pincode;
                                     }
 
                                     setModalState(() {
                                       isVerifyingOtp = false;
+                                      savedSuggestion = refreshedSuggestion;
+                                      savedSuggestionApplied = false;
                                       currentStep = 2;
                                     });
                                   },
@@ -935,6 +928,35 @@ class _WishlistScreenState extends State<WishlistScreen> {
                     ]
                     // STEP 2: ADDRESS & ORDER CHECKOUT
                     else ...[
+                      SavedCheckoutSuggestionCard(
+                        savedDetails: savedSuggestion,
+                        isApplied: savedSuggestionApplied,
+                        onApplySaved: () {
+                          final details = savedSuggestion;
+                          if (details == null) return;
+                          HapticFeedback.selectionClick();
+                          setModalState(() {
+                            if (details.name.isNotEmpty) {
+                              nameController.text = details.name;
+                            }
+                            if (details.address.isNotEmpty) {
+                              addressController.text = details.address;
+                            }
+                            if (details.pincode.isNotEmpty) {
+                              pincodeController.text = details.pincode;
+                            }
+                            savedSuggestionApplied = true;
+                          });
+                        },
+                        onEnterNew: () {
+                          HapticFeedback.selectionClick();
+                          setModalState(() {
+                            nameController.clear();
+                            addressController.clear();
+                            savedSuggestionApplied = false;
+                          });
+                        },
+                      ),
                       // Fulfillment Selector
                       const Text('Fulfillment Method', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _forestGreen)),
                     const SizedBox(height: 6),
@@ -1132,9 +1154,7 @@ class _WishlistScreenState extends State<WishlistScreen> {
                         child: ElevatedButton(
                           onPressed: () async {
                             HapticFeedback.mediumImpact();
-                            final cName = nameController.text.trim().isEmpty
-                                ? (AppState.instance.userName ?? '')
-                                : nameController.text.trim();
+                            final cName = nameController.text.trim();
                             if (cName.isEmpty || cName.length < 2) {
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -1247,6 +1267,20 @@ class _WishlistScreenState extends State<WishlistScreen> {
                               razorpayPaymentId: paymentId,
                               razorpayOrderId: rzpOrderId,
                             );
+
+                            unawaited(AppState.instance.saveCheckoutProfileDetails(
+                              name: cName,
+                              phone: cPhone,
+                              address: deliveryOption == 'Doorstep Delivery'
+                                  ? addressController.text.trim()
+                                  : (AppState.instance.userAddress ?? ''),
+                              city: AppState.instance.userLocation.city.isNotEmpty
+                                  ? AppState.instance.userLocation.city
+                                  : selectedStore.city,
+                              pincode: pincodeController.text.trim().isNotEmpty
+                                  ? pincodeController.text.trim()
+                                  : selectedStore.pincode,
+                            ));
 
                             // Remove item from wishlist once ordered
                             AppState.instance.toggleWishlist(item.id);

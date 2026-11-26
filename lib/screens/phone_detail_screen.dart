@@ -11,6 +11,7 @@ import 'package:ecofone/screens/directions_sheet.dart';
 import 'package:ecofone/screens/location_sheet.dart';
 import 'package:ecofone/state/app_state.dart';
 import 'package:ecofone/core/widgets/pos_invoice_sheet.dart';
+import 'package:ecofone/core/widgets/saved_checkout_suggestion_card.dart';
 import 'package:ecofone/services/payment/razorpay_checkout_service.dart';
 import 'package:ecofone/services/network/connectivity_service.dart';
 
@@ -1396,18 +1397,16 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
     final tenDigit = cleanPhone.length >= 10
         ? cleanPhone.substring(cleanPhone.length - 10)
         : cleanPhone;
-    final nameController = TextEditingController(text: AppState.instance.userName ?? '');
+    var savedSuggestion = AppState.instance.getSavedCheckoutDetails();
+    bool savedSuggestionApplied = false;
+    final nameController = TextEditingController();
     final phoneController = TextEditingController(text: tenDigit);
-    final loc = AppState.instance.userLocation;
-    final defaultAddress = [
-      if (loc.area.isNotEmpty) loc.area,
-      if (loc.city.isNotEmpty) loc.city,
-      'Uttar Pradesh',
-    ].join(', ');
-    final addressController = TextEditingController(
-      text: loc.city.isNotEmpty ? defaultAddress : '',
+    final addressController = TextEditingController();
+    final pincodeController = TextEditingController(
+      text: (savedSuggestion != null && savedSuggestion.pincode.isNotEmpty)
+          ? savedSuggestion.pincode
+          : AppState.instance.userLocation.pincode,
     );
-    final pincodeController = TextEditingController(text: AppState.instance.userLocation.pincode);
 
     String deliveryOption = 'Doorstep Delivery'; // 'Doorstep Delivery' or 'Store Pickup'
     String paymentMethod = 'Cash on Delivery'; // 'Cash on Delivery', 'Instant UPI', 'Card / NetBanking'
@@ -1809,25 +1808,19 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
 
                                     resendTimer?.cancel();
 
-                                    // Successfully logged in! Populate Step 2 fields and advance!
+                                    // Successfully logged in! Load any saved profile suggestion & advance to Order Checkout!
                                     phoneController.text = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
-                                    if (profile.name.isNotEmpty && profile.name != 'Valued Customer') {
-                                      nameController.text = profile.name;
-                                    }
-                                    final currentLoc = AppState.instance.userLocation;
-                                    if (currentLoc.area.isNotEmpty) {
-                                      addressController.text = [
-                                        currentLoc.area,
-                                        if (currentLoc.city.isNotEmpty) currentLoc.city,
-                                        'Uttar Pradesh'
-                                      ].join(', ');
-                                    }
-                                    if (currentLoc.pincode.isNotEmpty) {
-                                      pincodeController.text = currentLoc.pincode;
+                                    final refreshedSuggestion = AppState.instance.getSavedCheckoutDetails();
+                                    nameController.clear();
+                                    addressController.clear();
+                                    if (refreshedSuggestion != null && refreshedSuggestion.pincode.isNotEmpty) {
+                                      pincodeController.text = refreshedSuggestion.pincode;
                                     }
 
                                     setModalState(() {
                                       isVerifyingOtp = false;
+                                      savedSuggestion = refreshedSuggestion;
+                                      savedSuggestionApplied = false;
                                       currentStep = 2; // Advance to Delivery & Order Step!
                                     });
                                   },
@@ -1855,6 +1848,35 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                     // STEP 2: DELIVERY DETAILS & PLACE ORDER
                     // ==========================================
                     else ...[
+                      SavedCheckoutSuggestionCard(
+                        savedDetails: savedSuggestion,
+                        isApplied: savedSuggestionApplied,
+                        onApplySaved: () {
+                          final details = savedSuggestion;
+                          if (details == null) return;
+                          HapticFeedback.selectionClick();
+                          setModalState(() {
+                            if (details.name.isNotEmpty) {
+                              nameController.text = details.name;
+                            }
+                            if (details.address.isNotEmpty) {
+                              addressController.text = details.address;
+                            }
+                            if (details.pincode.isNotEmpty) {
+                              pincodeController.text = details.pincode;
+                            }
+                            savedSuggestionApplied = true;
+                          });
+                        },
+                        onEnterNew: () {
+                          HapticFeedback.selectionClick();
+                          setModalState(() {
+                            nameController.clear();
+                            addressController.clear();
+                            savedSuggestionApplied = false;
+                          });
+                        },
+                      ),
                       // 1. Delivery / Pickup Toggle Selector
                     const Text(
                       'Fulfillment Method',
@@ -2179,9 +2201,7 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () async {
-                          final customerName = nameController.text.trim().isEmpty
-                              ? (AppState.instance.userName ?? '')
-                              : nameController.text.trim();
+                          final customerName = nameController.text.trim();
                           if (customerName.isEmpty || customerName.length < 2) {
                             ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -2306,14 +2326,19 @@ class _PhoneDetailContentState extends State<PhoneDetailContent> {
                             AppState.instance.login(name: customerName, phone: formattedPhone);
                           }
 
-                          // Update profile details in central DB so address is permanently saved
-                          unawaited(AppState.instance.updateProfileDetails(
+                          // Save delivery details so old data can be suggested on subsequent orders
+                          unawaited(AppState.instance.saveCheckoutProfileDetails(
                             name: customerName,
+                            phone: formattedPhone,
+                            address: deliveryOption == 'Doorstep Delivery'
+                                ? addressController.text.trim()
+                                : (AppState.instance.userAddress ?? ''),
                             city: AppState.instance.userLocation.city.isNotEmpty
                                 ? AppState.instance.userLocation.city
                                 : selectedStore.city,
-                            area: addressController.text.trim(),
-                            pincode: pincodeController.text.trim(),
+                            pincode: pincodeController.text.trim().isNotEmpty
+                                ? pincodeController.text.trim()
+                                : selectedStore.pincode,
                           ));
 
                           if (!context.mounted) return;

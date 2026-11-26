@@ -7,7 +7,6 @@ import 'package:ecofone/core/widgets/brand_logo.dart';
 import 'package:ecofone/screens/location_sheet.dart';
 import 'package:ecofone/screens/orders_screen.dart';
 import 'package:ecofone/state/app_state.dart';
-import 'package:ecofone/services/location_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onTradeInTap;
@@ -648,18 +647,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showLoginModal() {
     final phoneCtrl = TextEditingController();
     final otpCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
-    final cityCtrl = TextEditingController(text: 'Lucknow');
-    final areaCtrl = TextEditingController(text: 'Gomti Nagar');
-    final pincodeCtrl = TextEditingController(text: '226010');
 
     bool otpSent = false;
-    bool isNewUserRegistration = false;
     bool isSendingOtp = false;
     bool isVerifying = false;
-    bool isSavingRegistration = false;
-    bool isDetectingLocation = false;
-    String? nameError;
     String? phoneError;
     String? activeDynamicOtp;
     int resendCountdown = 30;
@@ -726,9 +717,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          isNewUserRegistration
-                              ? Icons.assignment_ind_rounded
-                              : (otpSent ? Icons.shield_outlined : Icons.lock_person_rounded),
+                          otpSent ? Icons.shield_outlined : Icons.lock_person_rounded,
                           color: _forestGreen,
                           size: 20,
                         ),
@@ -739,9 +728,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isNewUserRegistration
-                                  ? 'Set Delivery Address'
-                                  : (otpSent ? 'Enter Verification Code' : 'Mobile Login / Sign Up'),
+                              otpSent ? 'Enter Verification Code' : 'Mobile Login / Sign Up',
                               style: const TextStyle(
                                 color: _forestGreen,
                                 fontWeight: FontWeight.bold,
@@ -749,11 +736,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             Text(
-                              isNewUserRegistration
-                                  ? 'Welcome, ${nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : 'Customer'}! Enter doorstep address'
-                                  : (otpSent
-                                      ? 'Enter 6-digit OTP sent to +91 ${phoneCtrl.text.trim()}'
-                                      : 'Enter your name and 10-digit mobile number'),
+                              otpSent
+                                  ? 'Enter 6-digit OTP sent to +91 ${phoneCtrl.text.trim()}'
+                                  : 'Enter your 10-digit mobile number to Sign In / Sign Up',
                               style: TextStyle(color: _forestGreen.withOpacity(0.6), fontSize: 11.5),
                             ),
                           ],
@@ -763,188 +748,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // STEP 3: NEW USER REGISTRATION FORM (DELIVERY ADDRESS ONLY)
-                  if (isNewUserRegistration) ...[
-                    // Delivery Location Container
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Row(
-                                children: [
-                                  Icon(Icons.location_on_rounded, size: 16, color: _forestGreen),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'Delivery Location',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _forestGreen),
-                                  ),
-                                ],
-                              ),
-                              BouncingWidget(
-                                scaleFactor: 0.95,
-                                onTap: isDetectingLocation
-                                    ? null
-                                    : () async {
-                                        setModalState(() => isDetectingLocation = true);
-                                        try {
-                                          final loc = await LocationService.fetchRealDeviceLocation();
-                                          if (loc != null) {
-                                            setModalState(() {
-                                              cityCtrl.text = loc.city;
-                                              areaCtrl.text = loc.area;
-                                              pincodeCtrl.text = loc.pincode;
-                                            });
-                                          }
-                                        } finally {
-                                          setModalState(() => isDetectingLocation = false);
-                                        }
-                                      },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: _forestGreen.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (isDetectingLocation)
-                                        const SizedBox(
-                                          width: 10,
-                                          height: 10,
-                                          child: CircularProgressIndicator(strokeWidth: 1.5, color: _forestGreen),
-                                        )
-                                      else
-                                        const Icon(Icons.my_location_rounded, size: 12, color: _forestGreen),
-                                      const SizedBox(width: 4),
-                                      const Text(
-                                        'Detect GPS',
-                                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: _forestGreen),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Quick City Selection Chips
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: ['Lucknow', 'Gorakhpur', 'Delhi NCR', 'Pune', 'Kanpur'].map((c) {
-                              final isSelected = cityCtrl.text.toLowerCase() == c.toLowerCase();
-                              return ChoiceChip(
-                                label: Text(c, style: TextStyle(fontSize: 10.5, color: isSelected ? Colors.white : Colors.black87)),
-                                selected: isSelected,
-                                selectedColor: _forestGreen,
-                                backgroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                onSelected: (val) {
-                                  if (val) setModalState(() => cityCtrl.text = c);
-                                },
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 8),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: TextField(
-                                  controller: cityCtrl,
-                                  textCapitalization: TextCapitalization.words,
-                                  decoration: InputDecoration(
-                                    labelText: 'City *',
-                                    isDense: true,
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                flex: 2,
-                                child: TextField(
-                                  controller: pincodeCtrl,
-                                  keyboardType: TextInputType.number,
-                                  maxLength: 6,
-                                  decoration: InputDecoration(
-                                    labelText: 'Pincode *',
-                                    counterText: '',
-                                    isDense: true,
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: areaCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: InputDecoration(
-                              labelText: 'Area / Street / Colony / Landmark *',
-                              hintText: 'e.g. Gomti Nagar, Viram Khand 1',
-                              isDense: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              prefixIcon: const Icon(Icons.home_work_outlined, size: 18),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.info_outline_rounded, size: 16, color: _forestGreen),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'You can add your alternate contact number and email anytime in Edit Profile.',
-                              style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ]
-                  // STEP 1: NAME AND PHONE NUMBER ENTRY
-                  else if (!otpSent) ...[
-                    TextField(
-                      controller: nameCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      onChanged: (val) {
-                        if (nameError != null) {
-                          setModalState(() => nameError = null);
-                        }
-                      },
-                      decoration: InputDecoration(
-                        labelText: 'Full Name *',
-                        hintText: 'e.g. Rahul Sharma',
-                        errorText: nameError,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.person_outline_rounded),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
+                  // STEP 1: PHONE NUMBER ENTRY ONLY (Login or Sign Up with mobile number)
+                  if (!otpSent) ...[
                     TextField(
                       controller: phoneCtrl,
                       keyboardType: TextInputType.phone,
@@ -1124,90 +929,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: (isVerifying || isSendingOtp || isSavingRegistration)
+                      onPressed: (isVerifying || isSendingOtp)
                           ? null
                           : () async {
                               final messenger = ScaffoldMessenger.of(context);
 
-                              // A. SAVE NEW USER REGISTRATION
-                              if (isNewUserRegistration) {
-                                final name = nameCtrl.text.trim();
-                                if (name.isEmpty) {
-                                  messenger.clearSnackBars();
-                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter your full name')));
-                                  return;
-                                }
-
-                                final city = cityCtrl.text.trim();
-                                if (city.isEmpty) {
-                                  messenger.clearSnackBars();
-                                  messenger.showSnackBar(const SnackBar(content: Text('Please select or enter your city')));
-                                  return;
-                                }
-
-                                final area = areaCtrl.text.trim();
-                                if (area.isEmpty) {
-                                  messenger.clearSnackBars();
-                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter your area / locality')));
-                                  return;
-                                }
-
-                                final pincode = pincodeCtrl.text.trim();
-                                if (pincode.length != 6) {
-                                  messenger.clearSnackBars();
-                                  messenger.showSnackBar(const SnackBar(content: Text('Please enter a valid 6-digit pincode')));
-                                  return;
-                                }
-
-                                setModalState(() => isSavingRegistration = true);
-
-                                final profile = await AppState.instance.completeRegistration(
-                                  name: name,
-                                  phone: phoneCtrl.text.trim(),
-                                  alternatePhone: null,
-                                  city: city,
-                                  area: area,
-                                  pincode: pincode,
-                                );
-
-                                if (sheetCtx.mounted) {
-                                  Navigator.pop(sheetCtx);
-                                }
-
-                                if (mounted) {
-                                  messenger.clearSnackBars();
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      backgroundColor: _forestGreen,
-                                      duration: const Duration(seconds: 4),
-                                      content: Row(
-                                        children: [
-                                          const Icon(Icons.verified_user_rounded, color: Colors.white, size: 20),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Text(
-                                              '🎉 Profile saved! Welcome to EcoFone, ${profile.name}!',
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }
-                                return;
-                              }
-
-                              // B. SEND OTP (STEP 1)
+                              // A. SEND OTP (STEP 1 - PHONE NUMBER ONLY)
                               if (!otpSent) {
-                                final name = nameCtrl.text.trim();
-                                if (name.isEmpty) {
-                                  setModalState(() {
-                                    nameError = 'Please enter your full name';
-                                  });
-                                  return;
-                                }
-
                                 final clean = phoneCtrl.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
                                 final isValidIndianNumber = RegExp(r'^[6-9]\d{9}$').hasMatch(clean);
 
@@ -1220,7 +948,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 setModalState(() {
                                   isSendingOtp = true;
-                                  nameError = null;
                                   phoneError = null;
                                 });
 
@@ -1235,7 +962,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 });
                                 startResendTimer(setModalState);
                               }
-                              // C. VERIFY OTP
+                              // C. VERIFY OTP & FINISH LOGIN / PHONE-ONLY SIGNUP
                               else {
                                 final enteredOtp = otpCtrl.text.trim();
                                 if (enteredOtp.isEmpty || enteredOtp.length < 4) {
@@ -1267,24 +994,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 resendTimer?.cancel();
 
-                                // If this is a first-time new user, prompt for details!
-                                if (profile.isNewUser) {
-                                  setModalState(() {
-                                    isVerifying = false;
-                                    isNewUserRegistration = true;
-                                  });
-                                  return;
-                                }
-
-                                // Otherwise, this is an existing user: Auto-saved data already loaded!
+                                // Complete phone-only sign-up or login immediately without asking Name or Address
                                 if (sheetCtx.mounted) {
                                   Navigator.pop(sheetCtx);
                                 }
 
                                 if (mounted) {
-                                  final displayName = profile.name;
-                                  final loc = AppState.instance.userLocation;
-                                  final locDisplay = loc.area.isNotEmpty ? '${loc.area}, ${loc.city}' : loc.city;
+                                  final savedDetails = AppState.instance.getSavedCheckoutDetails();
+                                  final String bannerText;
+                                  if (profile.isNewUser) {
+                                    bannerText = '🎉 Account ready with ${profile.phone}! Complete your name & address on your first order.';
+                                  } else if (savedDetails != null && savedDetails.name.isNotEmpty) {
+                                    bannerText = '🎉 Welcome back, ${savedDetails.name}! Your saved details will be suggested on order checkout.';
+                                  } else {
+                                    bannerText = '🎉 Signed in as ${profile.phone}! Complete your delivery details on your first order.';
+                                  }
+
                                   messenger.clearSnackBars();
                                   messenger.showSnackBar(
                                     SnackBar(
@@ -1292,11 +1017,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       duration: const Duration(seconds: 4),
                                       content: Row(
                                         children: [
-                                          const Icon(Icons.cloud_done_rounded, color: Colors.white, size: 20),
+                                          const Icon(Icons.verified_user_rounded, color: Colors.white, size: 20),
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Text(
-                                              '🎉 Welcome back, $displayName! Location ($locDisplay) restored.',
+                                              bannerText,
                                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                                             ),
                                           ),
@@ -1313,16 +1038,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: (isVerifying || isSendingOtp || isSavingRegistration)
+                      child: (isVerifying || isSendingOtp)
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                             )
                           : Text(
-                              isNewUserRegistration
-                                  ? 'Confirm Address & Finish'
-                                  : (otpSent ? 'Verify & Continue' : 'Send Verification OTP'),
+                              otpSent ? 'Verify & Continue' : 'Send Verification OTP',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                     ),
@@ -1343,7 +1066,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final altPhoneCtrl = TextEditingController(text: AppState.instance.userAlternatePhone ?? '');
     final emailCtrl = TextEditingController(text: AppState.instance.userEmail ?? '');
     final cityCtrl = TextEditingController(text: AppState.instance.userLocation.city);
-    final areaCtrl = TextEditingController(text: AppState.instance.userLocation.area);
+    final initialAreaOrAddress = (AppState.instance.userAddress ?? '').trim().isNotEmpty
+        ? AppState.instance.userAddress!
+        : AppState.instance.userLocation.area;
+    final areaCtrl = TextEditingController(text: initialAreaOrAddress);
     final pincodeCtrl = TextEditingController(text: AppState.instance.userLocation.pincode);
     bool isSaving = false;
 
@@ -1521,6 +1247,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 email: email.isNotEmpty ? email : null,
                                 city: cityCtrl.text.trim(),
                                 area: areaCtrl.text.trim(),
+                                address: areaCtrl.text.trim(),
                                 pincode: pin.isNotEmpty ? pin : null,
                               );
 

@@ -238,10 +238,11 @@ class RealtimeBackendService implements BackendService {
         return null;
       }
 
-      String resolvedName = (name != null && name.trim().isNotEmpty) ? name.trim() : '';
+      String resolvedName = (name != null && !UserProfile.isPlaceholderName(name)) ? name.trim() : '';
       String? resolvedEmail = '$tenDigit@ecofone.in';
       String? resolvedCity;
       String? resolvedArea;
+      String? resolvedAddress;
       String? resolvedPincode;
       String? resolvedAlternatePhone;
       bool isNewUserDetected = false;
@@ -253,15 +254,16 @@ class RealtimeBackendService implements BackendService {
           if (backendUser.isNewUser) {
             isNewUserDetected = true;
           } else {
-            if (backendUser.name.isNotEmpty) resolvedName = backendUser.name;
+            if (backendUser.hasSavedName) resolvedName = backendUser.name.trim();
             if (backendUser.email != null && backendUser.email!.isNotEmpty) resolvedEmail = backendUser.email;
             if (backendUser.city != null && backendUser.city!.isNotEmpty) resolvedCity = backendUser.city;
             if (backendUser.area != null && backendUser.area!.isNotEmpty) resolvedArea = backendUser.area;
+            if (backendUser.effectiveSavedAddress.isNotEmpty) resolvedAddress = backendUser.effectiveSavedAddress;
             if (backendUser.pincode != null && backendUser.pincode!.isNotEmpty) resolvedPincode = backendUser.pincode;
             if (backendUser.alternatePhone != null && backendUser.alternatePhone!.isNotEmpty) {
               resolvedAlternatePhone = backendUser.alternatePhone;
             }
-            debugPrint('[RealtimeBackend] Found existing user in Central DB: $resolvedName, Loc: $resolvedArea, $resolvedCity ($resolvedPincode), Alt: $resolvedAlternatePhone');
+            debugPrint('[RealtimeBackend] Found existing user in Central DB: $resolvedName, Addr: $resolvedAddress, Loc: $resolvedArea, $resolvedCity ($resolvedPincode)');
           }
         }
       } catch (e) {
@@ -269,7 +271,7 @@ class RealtimeBackendService implements BackendService {
       }
 
       // 2. Check Cloud Firestore if not found in central DB
-      if (!isNewUserDetected && resolvedName.isEmpty) {
+      if (!isNewUserDetected && (resolvedName.isEmpty || (resolvedAddress == null || resolvedAddress.isEmpty))) {
         try {
           final userDoc = await FirebaseFirestore.instance
               .collection('users')
@@ -278,18 +280,22 @@ class RealtimeBackendService implements BackendService {
 
           if (userDoc.exists && userDoc.data() != null) {
             final data = userDoc.data()!;
-            if (data['name'] != null && (data['name'] as String).isNotEmpty) {
-              resolvedName = data['name'] as String;
+            if (resolvedName.isEmpty && !UserProfile.isPlaceholderName(data['name'] as String?)) {
+              resolvedName = (data['name'] as String).trim();
             }
             if (data['email'] != null) resolvedEmail = data['email'] as String;
-            if (data['city'] != null) resolvedCity = data['city'] as String;
-            if (data['area'] != null) resolvedArea = data['area'] as String;
-            if (data['pincode'] != null) resolvedPincode = data['pincode'] as String;
+            if (resolvedCity == null && data['city'] != null) resolvedCity = data['city'] as String;
+            if (resolvedArea == null && data['area'] != null) resolvedArea = data['area'] as String;
+            if ((resolvedAddress == null || resolvedAddress.isEmpty) &&
+                !UserProfile.isPlaceholderAddress(data['address'] as String?)) {
+              resolvedAddress = (data['address'] as String).trim();
+            }
+            if (resolvedPincode == null && data['pincode'] != null) resolvedPincode = data['pincode'] as String;
             if (data['alternatePhone'] != null || data['alternate_phone'] != null) {
               resolvedAlternatePhone = (data['alternatePhone'] ?? data['alternate_phone']) as String?;
             }
             debugPrint('[RealtimeBackend] Restored user profile from Cloud Firestore: $resolvedName');
-          } else {
+          } else if (resolvedName.isEmpty && (resolvedAddress == null || resolvedAddress.isEmpty)) {
             isNewUserDetected = true;
           }
         } catch (e) {
@@ -297,8 +303,8 @@ class RealtimeBackendService implements BackendService {
         }
       }
 
-      // If user had no recorded profile anywhere, they are definitely a new user
-      if (resolvedName.isEmpty && (resolvedCity == null || resolvedCity.isEmpty)) {
+      // If user had no recorded profile anywhere, mark as new phone-only user
+      if (resolvedName.isEmpty && (resolvedAddress == null || resolvedAddress.isEmpty) && (resolvedCity == null || resolvedCity.isEmpty)) {
         isNewUserDetected = true;
       }
 
@@ -327,24 +333,44 @@ class RealtimeBackendService implements BackendService {
         debugPrint('[RealtimeBackend] Firestore orders restore fallback: $e');
       }
 
-      // 4. Create active UserProfile
+      // Also inspect matching saved orders locally for returning-user suggestions
+      for (final ord in _currentOrders) {
+        if (normalizeTenDigit(ord.customerPhone) == tenDigit) {
+          if (resolvedName.isEmpty && !UserProfile.isPlaceholderName(ord.customerName)) {
+            resolvedName = ord.customerName.trim();
+          }
+          if ((resolvedAddress == null || resolvedAddress.isEmpty) &&
+              !UserProfile.isPlaceholderAddress(ord.deliveryAddress) &&
+              !ord.deliveryOption.toLowerCase().contains('store pickup')) {
+            resolvedAddress = ord.deliveryAddress.trim();
+          }
+          if ((resolvedPincode == null || resolvedPincode.isEmpty) && (ord.customerPincode ?? '').trim().isNotEmpty) {
+            resolvedPincode = ord.customerPincode!.trim();
+          }
+          if ((resolvedCity == null || resolvedCity.isEmpty) && (ord.customerCity ?? '').trim().isNotEmpty) {
+            resolvedCity = ord.customerCity!.trim();
+          }
+        }
+      }
+
+      // 4. Create active UserProfile (always persist phone-only session immediately without dummy details)
       final profile = UserProfile(
-        name: resolvedName.isNotEmpty ? resolvedName : (name ?? 'Valued Customer'),
+        name: resolvedName,
         phone: formattedPhone,
         alternatePhone: resolvedAlternatePhone,
         email: resolvedEmail,
         city: resolvedCity,
         area: resolvedArea,
+        address: resolvedAddress,
         pincode: resolvedPincode,
         token: 'ECO-JWT-${DateTime.now().millisecondsSinceEpoch}',
         lastLoginAt: DateTime.now(),
         isNewUser: isNewUserDetected,
       );
 
-      if (!isNewUserDetected) {
-        await storage.saveUserProfile(profile);
-        _syncProfileToFirestore(profile);
-      }
+      await storage.saveUserProfile(profile);
+      _syncProfileToFirestore(profile);
+      unawaited(billingApi.syncUser(profile: profile));
       return profile;
     } catch (e) {
       debugPrint('[RealtimeBackend] verifyOtpAndLogin error: $e');
