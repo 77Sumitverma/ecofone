@@ -27,7 +27,7 @@ void main() {
     expect(state.allInventory.length, greaterThanOrEqualTo(11));
   });
 
-  testWidgets('StockScreen displays all inventory and real-time inventory status for logged-out / guest user', (tester) async {
+  testWidgets('StockScreen hides internal live inventory banner and supports pull-to-refresh', (tester) async {
     AppState.instance.logout();
     expect(AppState.instance.isLoggedIn, isFalse);
 
@@ -41,10 +41,19 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    // Verify Real-Time Inventory status header is visible
-    expect(find.textContaining('All Live Inventory'), findsOneWidget);
-    expect(find.text('LIVE POS'), findsOneWidget);
-    expect(find.textContaining('Guest Mode'), findsOneWidget);
+    // Verify internal Live Inventory status banner & manual refresh icon are NOT shown
+    expect(find.textContaining('All Live Inventory'), findsNothing);
+    expect(find.text('LIVE POS'), findsNothing);
+    expect(find.textContaining('Guest Mode'), findsNothing);
+    expect(find.byIcon(Icons.sync_rounded), findsNothing);
+
+    // Verify RefreshIndicator is attached for pull-to-refresh stock updates
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+    await tester.fling(find.byType(CustomScrollView), const Offset(0, 300), 1000);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(seconds: 3));
 
     // Verify phone items from all inventory are displayed
     expect(find.textContaining('iPhone'), findsWidgets);

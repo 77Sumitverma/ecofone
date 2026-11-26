@@ -162,11 +162,14 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
               return;
             }
             setState(() => _isLoading = true);
-            await Future.wait([
-              AppState.instance.refreshInventory(),
-              AppState.instance.refreshBanners(),
-            ]);
-            if (mounted) setState(() => _isLoading = false);
+            try {
+              await Future.wait([
+                AppState.instance.refreshInventory(silent: true),
+                AppState.instance.refreshBanners(silent: true),
+              ]);
+            } finally {
+              if (mounted) setState(() => _isLoading = false);
+            }
           },
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
@@ -178,8 +181,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
               _buildOffersCarousel(),
               _buildSellOldPhoneBanner(),
               _buildBrandSelector(),
-              _buildRealtimeInventoryHeader(items.length),
-              const SliverToBoxAdapter(child: SizedBox(height: 10)),
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
               _buildStockList(items),
               const SliverToBoxAdapter(child: SizedBox(height: 110)),
             ],
@@ -930,151 +932,6 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
               ),
             );
           },
-        ),
-      ),
-    );
-  }
-
-  // --- Live Real-Time Inventory & Guest Shopping Status Header ---
-  Widget _buildRealtimeInventoryHeader(int itemCount) {
-    final isLoggedIn = AppState.instance.isLoggedIn;
-
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: EcoColors.mintBorder.withOpacity(0.8),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: EcoColors.forestGreen.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              // Pulsing Live Dot + Inventory Header
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Center(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withOpacity(0.35),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF10B981),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            isLoggedIn
-                                ? 'Real-Time Inventory ($itemCount Available)'
-                                : 'All Live Inventory ($itemCount in Stock)',
-                            style: GoogleFonts.plusJakartaSans(
-                              color: const Color(0xFF0F172A),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.2,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text(
-                            'LIVE POS',
-                            style: TextStyle(
-                              color: Color(0xFF059669),
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.4,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      !isLoggedIn
-                          ? 'Guest Mode • Real-time catalog from all hubs ready for delivery'
-                          : 'All verified hubs • Lucknow, Pune & Express Doorstep Delivery',
-                      style: GoogleFonts.plusJakartaSans(
-                        color: const Color(0xFF64748B),
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Quick Refresh Live Inventory Button
-              BouncingWidget(
-                scaleFactor: 0.90,
-                onTap: () async {
-                  HapticFeedback.lightImpact();
-                  await AppState.instance.refreshInventory(silent: false);
-                  if (mounted) setState(() {});
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.sync_rounded,
-                    size: 16,
-                    color: EcoColors.forestGreen,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
